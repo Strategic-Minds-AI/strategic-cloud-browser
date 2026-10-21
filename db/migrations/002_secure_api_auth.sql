@@ -51,4 +51,12 @@ GRANT EXECUTE ON FUNCTION cloudbrowser_private.lookup_api_key(TEXT, TEXT) TO clo
 -- Direct reads of stored HMAC digests are forbidden to the unprivileged API
 -- connection. The narrowly scoped security-definer lookup is its only path.
 REVOKE ALL ON TABLE public.api_keys FROM cloudbrowser_api;
+
+-- Tenant metadata must be isolated too: tenant.id is the authenticated tenant.
+ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenants_tenant_isolation ON public.tenants;
+CREATE POLICY tenants_tenant_isolation ON public.tenants
+  TO cloudbrowser_api
+  USING (id = NULLIF(current_setting('app.tenant_id', true), '')::UUID)
+  WITH CHECK (id = NULLIF(current_setting('app.tenant_id', true), '')::UUID);
 COMMIT;
