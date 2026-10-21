@@ -4,6 +4,7 @@ on:
     branches: ["security/cloudbrowser-sandbox-isolation-20261021"]
     paths:
       - "browser-engine/**"
+      - "docs/security/CLOUDBROWSER_CHROMIUM_SANDBOX_CANDIDATE_20261021.md"
       - ".github/workflows/cloudbrowser-sandbox-candidate.yml"
   workflow_dispatch:
 permissions:
