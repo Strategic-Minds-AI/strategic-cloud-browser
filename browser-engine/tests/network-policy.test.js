@@ -49,7 +49,11 @@ test("rejects hostname when any DNS A or AAAA answer is non-public", async () =>
 
 test("revalidates each redirected request and rejects DNS rebinding preflight", async () => {
   let handler;
-  const ctx = { async route(_matcher, cb) { handler = cb; } };
+  let wsHandler;
+  const ctx = {
+    async route(_matcher, cb) { handler = cb; },
+    async routeWebSocket(_matcher, cb) { wsHandler = cb; }
+  };
   let count = 0;
   await installOutboundGuard(ctx, {
     resolve: async () => [{ address: ++count === 1 ? "8.8.8.8" : "127.0.0.1", family: 4 }]
@@ -58,12 +62,19 @@ test("revalidates each redirected request and rejects DNS rebinding preflight", 
     let result;
     await handler({
       request: () => ({ url: () => url }),
-      continue: async () => { result = "continued"; },
+      fallback: async () => { result = "delegated"; },
       abort: async () => { result = "aborted"; }
     });
     return result;
   }
-  assert.equal(await request("https://example.com/first"), "continued");
+  assert.equal(await request("https://example.com/first"), "delegated");
   assert.equal(await request("https://example.com/redirect"), "aborted");
   assert.equal(await request("http://169.254.169.254/latest/meta-data"), "aborted");
+  let closed;
+  wsHandler({ close: async (options) => { closed = options; } });
+  assert.equal(closed?.code, 1008);
+});
+
+test("fails closed when runtime cannot intercept WebSockets", async () => {
+  await assert.rejects(() => installOutboundGuard({ route: async () => {} }), /WebSocket egress guard unavailable/);
 });
