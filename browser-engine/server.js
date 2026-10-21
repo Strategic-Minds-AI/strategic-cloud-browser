@@ -8,6 +8,7 @@ import { validateTargetUrl as checkTargetUrl, installOutboundGuard } from "./net
 import { generateFingerprint, getFingerprintInitScript } from './fingerprint-randomizer.js';
 import { humanClick, humanType, generateMousePath, humanDelay } from './human-behavior.js';
 import SessionManager from './session-manager.js';
+import { extractText, extractHtml } from "./extract-content.js";
 
 
 const app = express();
@@ -708,8 +709,8 @@ api.post("/sessions/:id/execute", async (req, res) => {
         }
         break;
       }
-      case "extract_text": { result.data = await (await locate(page, selector)).innerText(); break; }
-      case "extract_html": { result.data = await (await locate(page, selector)).innerHTML(); break; }
+      case "extract_text": { result.data = await extractText(page, selector, locate); break; }
+      case "extract_html": { result.data = await extractHtml(page, selector, locate); break; }
       case "extract_attribute": { result.data = await (await locate(page, selector)).getAttribute(options.attribute || "href"); break; }
       case "extract_table": { result.data = await page.evaluate((sel) => { const t = document.querySelector(sel); if (!t) return []; return [...t.querySelectorAll("tr")].map((r) => [...r.querySelectorAll("th,td")].map((c) => c.innerText.trim())); }, selector); break; }
       case "extract_json": { result.data = await page.evaluate(options.evaluateFn || `(selector) => document.querySelector(selector)?.innerText`, selector); try { result.data = JSON.parse(result.data); } catch (e) {} break; }
