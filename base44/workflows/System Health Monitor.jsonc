@@ -1,0 +1,48 @@
+{
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "interval",
+      "cron_expression": null,
+      "one_time_date": null,
+      "timezone": "UTC",
+      "interval_value": 30,
+      "interval_unit": "minutes",
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "name": "System Health Monitor",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "system_health_monitor",
+      "version": "1.1",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_autocomplete_deep_check": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAutoCompleteGovernedCycle",
+            "args": {
+              "trigger": "health_30m",
+              "force_deep": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run governed AutoComplete deep check",
+            "description": "Deep validation followed by mandatory repair-integrity enforcement"
+          }
+        }
+      }
+    ]
+  },
+  "description": "Every 30 minutes: deep AutoComplete validation through the canonical governed wrapper. It does not independently trigger production Railway healing."
+}

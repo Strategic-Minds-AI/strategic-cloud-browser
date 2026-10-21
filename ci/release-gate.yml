@@ -1,0 +1,160 @@
+# CI/CD Release Gate — CloudBrowser Control V1
+#
+# MIRROR OF THE LIVE WORKFLOW
+#   This is the exact content of .github/workflows/release-gate.yml.
+#   The Base44 builder cannot write to .github/workflows/ (the GitHub app that
+#   syncs this app to a repository has no permission to modify Actions
+#   workflows), so changes are authored here and copied across.
+#
+#   cp ci/release-gate.yml .github/workflows/release-gate.yml
+#   git add ci/release-gate.yml .github/workflows/release-gate.yml
+#   git commit -m "ci: run the full contract suite and gate on lockfiles"
+#   git push
+#
+#   Until this file is copied to .github/workflows/release-gate.yml AND produces
+#   a green run, CI/CD remains PENDING and the release gate is NOT verified.
+
+name: Release Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  code-quality:
+    name: Code Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Full contract test suite (all 8 files)
+        run: npm test
+
+      - name: Reproducible build gate — every deployable service carries a lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          MISSING=0
+          for d in api worker browser-engine; do
+            if [ ! -f "$d/package-lock.json" ]; then
+              echo "MISSING lockfile: $d/package-lock.json"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -eq 1 ]; then
+            echo "FAIL: a service deployable from this repository cannot be rebuilt reproducibly."
+            echo "Generate each lockfile once with: npm install --package-lock-only --prefix <dir>"
+            exit 1
+          fi
+          echo "PASS: api, worker and browser-engine all carry committed lockfiles"
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  engine-syntax:
+    name: Browser Engine Syntax Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check engine syntax
+        working-directory: browser-engine
+        run: node --check server.js
+
+      - name: Check Railway operator syntax
+        run: node --check operator/index.js
+
+      # The engine's contract tests import only node: builtins, so they need no
+      # dependency install — verified locally at 16 passing.
+      - name: Run browser engine contract tests
+        working-directory: browser-engine
+        run: npm test
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for plaintext credential property keys in entity schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Match only exact JSONC property names. Encrypted and boolean-presence
+          # keys (password_encrypted, has_password, etc.) do not match this pattern.
+          if grep -rnE '^[[:space:]]*"(password|secret|cookies|storage_state)"[[:space:]]*:' base44/entities/ --include='*.jsonc'; then
+            echo "FAIL: Plaintext credential property key found in entity schema"
+            exit 1
+          fi
+          echo "PASS: No plaintext password/secret/cookies/storage_state property keys in entity schemas"
+
+      - name: Check for hardcoded API keys
+        run: |
+          if grep -rE '(cb_live_|cb_test_)[a-f0-9]{32}' src/ base44/ --include='*.ts' --include='*.jsx' --include='*.js'; then
+            echo "FAIL: Hardcoded API key found in source"
+            exit 1
+          fi
+          echo "PASS: No hardcoded API keys in source"
+
+      - name: Check SSRF guards
+        run: |
+          grep -q "isBlockedHost" browser-engine/server.js || { echo "FAIL: SSRF guard not found in engine"; exit 1; }
+          echo "PASS: SSRF guards present"
+
+      - name: Check RLS enabled on all entities
+        run: |
+          MISSING=0
+          for f in base44/entities/*.jsonc; do
+            # User.jsonc is built-in with platform-managed security (no explicit rls key needed)
+            if [ "$(basename "$f")" = "User.jsonc" ]; then
+              continue
+            fi
+            if ! grep -q '"rls"' "$f"; then
+              echo "FAIL: RLS not found in $f"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -eq 1 ]; then exit 1; fi
+          echo "PASS: RLS enabled on all entity schemas"
+
+  release-status:
+    name: Release Gate Status
+    runs-on: ubuntu-latest
+    needs: [code-quality, engine-syntax, security-audit]
+    steps:
+      - run: echo "All required gates passed - release candidate verified"

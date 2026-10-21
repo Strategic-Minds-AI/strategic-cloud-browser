@@ -1,0 +1,116 @@
+{
+  "name": "Approval",
+  "type": "object",
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "description": "Stable approval identifier (e.g. appr_<ts>)"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "system_id": {
+      "type": "string"
+    },
+    "action_type": {
+      "type": "string",
+      "description": "What protected action is being approved (production_deploy, default_branch_merge, db_migration, secret_change, domain_purchase, deletion, etc.)"
+    },
+    "target": {
+      "type": "string",
+      "description": "Specific target of the action (repo, app, resource)"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "read",
+        "draft",
+        "branch_write",
+        "preview_write",
+        "protected"
+      ],
+      "default": "protected"
+    },
+    "environment": {
+      "type": "string",
+      "enum": [
+        "sandbox",
+        "branch",
+        "preview",
+        "production"
+      ],
+      "default": "production"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "granted",
+        "rejected",
+        "expired",
+        "revoked"
+      ],
+      "default": "pending"
+    },
+    "approved_by": {
+      "type": "string"
+    },
+    "approved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "rollback_reference": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the approval was requested/granted/rejected"
+    },
+    "requested_by": {
+      "type": "string"
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "approval_id",
+    "action_type",
+    "scope",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

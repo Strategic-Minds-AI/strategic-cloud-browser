@@ -1,0 +1,163 @@
+{
+  "name": "Job",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "retrying",
+        "cancelled"
+      ],
+      "default": "queued"
+    },
+    "priority": {
+      "type": "number",
+      "default": 5,
+      "description": "Queue priority 1 (highest) to 10 (lowest). Higher-priority jobs are dequeued first."
+    },
+    "start_url": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Reference to Session entity"
+    },
+    "schedule_id": {
+      "type": "string",
+      "description": "Reference to Schedule that triggered this job, if any"
+    },
+    "retry_count": {
+      "type": "number",
+      "default": 0
+    },
+    "max_retries": {
+      "type": "number",
+      "default": 3
+    },
+    "backoff_seconds": {
+      "type": "number",
+      "default": 30
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "results_summary": {
+      "type": "object",
+      "description": "Counts and summary of results produced"
+    },
+    "steps_count": {
+      "type": "number",
+      "default": 0
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "session_config": {
+      "type": "object",
+      "description": "Session options: viewport, user_agent, proxy_id, headers, blocked_resources, shadow_mode, tls_fingerprint, etc."
+    },
+    "shadow_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the job runs in shadow/safe mode \u2014 read-only, no mutations, captures site defenses for hardening before going live"
+    },
+    "shadow_report": {
+      "type": "object",
+      "description": "Defense analysis captured during a shadow run: detected captcha, bot-detection scripts, rate limits, honeypots, blocked resources, fingerprint checks"
+    },
+    "depends_on_job_id": {
+      "type": "string",
+      "description": "Parent job that must complete before this one starts"
+    },
+    "dependency_condition": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "completed_with_results",
+        "always"
+      ],
+      "default": "completed"
+    },
+    "parent_job_id": {
+      "type": "string",
+      "description": "If this is a fan-out child, the parent job ID"
+    },
+    "fan_out_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Run the same job across multiple URLs"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "version_number": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "name",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

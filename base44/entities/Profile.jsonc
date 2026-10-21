@@ -1,0 +1,82 @@
+{
+  "name": "Profile",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "user_data_dir": {
+      "type": "string",
+      "description": "Path to persistent user data directory on engine"
+    },
+    "cookies_encrypted": {
+      "type": "string",
+      "description": "AES-GCM encrypted cookies JSON (base64). Never returned to frontend."
+    },
+    "storage_state_encrypted": {
+      "type": "string",
+      "description": "AES-GCM encrypted localStorage/sessionStorage JSON (base64). Never returned to frontend."
+    },
+    "has_cookies": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether cookies are saved (safe for frontend display)"
+    },
+    "has_storage_state": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether storage state is saved (safe for frontend display)"
+    },
+    "last_used": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

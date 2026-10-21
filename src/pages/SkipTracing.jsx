@@ -1,0 +1,456 @@
+import { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Radar, Phone, Mail, MapPin, Users, Search, AlertCircle, CheckCircle, Clock, Database, Loader2, Building, User, Globe, LayoutDashboard, ChevronDown, ChevronRight } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { SKIP_TRACE_DEEP_CATALOG } from "@/lib/searchSourceCatalog";
+import SkipTracingDashboard from "@/components/skip-tracing/SkipTracingDashboard";
+
+export default function SkipTracing() {
+  const [form, setForm] = useState({ property_address: "", owner_name: "", phone: "", email: "", company: "", spreadsheet_url: "1YJnYg9xY0uuaiIlK6HOnHBrak4ZjxTvcdiLO5QKeCu0", permissible_purpose: "", legal_matter: "", case_reference: "" });
+  // Mirrors base44/shared/searchValidation.ts PERMISSIBLE_PURPOSES. The server
+  // validates against its own table; this list only populates the picker.
+  const PURPOSE_OPTIONS = [
+    ["fiduciary_duty", "Fiduciary duty — estate, probate or trust administration"],
+    ["litigation", "Litigation — locating a party or witness, or asset recovery"],
+    ["court_order", "Court order or federal grand jury subpoena"],
+    ["consumer_written_instruction", "Written instruction of the consumer"],
+    ["account_review_collection", "Review or collection of an account"],
+    ["business_transaction", "Business transaction initiated by the consumer"],
+    ["legal_compliance", "Compliance with federal, state or local law"],
+    ["government_authorized", "Authorized government or law-enforcement function"],
+  ];
+  const [deepSearch, setDeepSearch] = useState(true);
+  const [showSources, setShowSources] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => { loadHistory(); }, []);
+
+  const loadHistory = async () => {
+    try {
+      const traces = await base44.entities.SkipTrace.list("-created_date", 50);
+      setHistory(traces);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleSearch = async (overrideForm) => {
+    // Authorization always comes from the form itself, so a caller-supplied
+    // override form can never silently drop the permissible purpose.
+    const base = overrideForm || form;
+    const searchForm = {
+      ...base,
+      permissible_purpose: base.permissible_purpose ?? form.permissible_purpose,
+      legal_matter: base.legal_matter ?? form.legal_matter,
+      case_reference: base.case_reference ?? form.case_reference,
+    };
+    if (!searchForm.property_address && !searchForm.owner_name && !searchForm.phone && !searchForm.email) {
+      setError("Enter at least one search field to begin tracing");
+      return;
+    }
+    setSearching(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await base44.functions.invoke("runSkipTraceFallback", {
+        ...searchForm,
+        deep_search: deepSearch,
+        spreadsheet_url: searchForm.spreadsheet_url,
+        authorization: {
+          permissible_purpose: searchForm.permissible_purpose,
+          legal_matter: searchForm.legal_matter,
+          case_reference: searchForm.case_reference,
+        },
+      });
+      const data = response.data || response;
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setResult(data);
+        loadHistory();
+      }
+    } catch (e) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const traceRelative = (relative) => {
+    const newForm = { ...form, owner_name: relative.name || "", phone: relative.phone || "", property_address: "", email: "" };
+    setForm(newForm);
+    handleSearch(newForm);
+  };
+
+  const ConfidenceBar = ({ score }) => (
+    <div className="flex items-center gap-2 w-32">
+      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+        <div className="h-full bg-gold-gradient rounded-full" style={{ width: `${score}%` }} />
+      </div>
+      <span className="text-xs font-medium text-muted-foreground w-8 text-right">{score}%</span>
+    </div>
+  );
+
+  const statusColor = (status) =>
+    status === "found" ? "text-green-500" : status === "partial" ? "text-yellow-500" : "text-red-500";
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-heading font-semibold flex items-center gap-2">
+          <Radar className="w-6 h-6 text-primary" />
+          Skip Tracing
+        </h1>
+        <p className="text-muted-foreground mt-1 max-w-3xl">
+          Identify property owners and find their contact info using every available source — property records,
+          people search, reverse phone, social media, email directories, relatives, and business records. Standard
+          mode runs 7 methods; Deep mode adds 11 more (voter, court, licenses, DMV, military, government registries,
+          church, alumni, newspapers, and death confirmation) for a total of 18 search methods.
+        </p>
+      </div>
+
+      <Tabs defaultValue="dashboard">
+        <TabsList>
+          <TabsTrigger value="dashboard"><LayoutDashboard className="w-4 h-4 mr-1" />Dashboard</TabsTrigger>
+          <TabsTrigger value="search"><Search className="w-4 h-4 mr-1" />Search</TabsTrigger>
+          <TabsTrigger value="history"><Database className="w-4 h-4 mr-1" />History ({history.length})</TabsTrigger>
+        </TabsList>
+
+        {/* Dashboard Tab */}
+        <TabsContent value="dashboard">
+          <SkipTracingDashboard traces={history} loading={loadingHistory} onRefresh={loadHistory} />
+        </TabsContent>
+
+        {/* Search Tab */}
+        <TabsContent value="search" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Start a New Trace</CardTitle>
+              <CardDescription>
+                Enter any information you have. The system will identify the owner and exhaust every source to
+                locate their contact info.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label><MapPin className="w-4 h-4 inline mr-1" />Property Address</Label>
+                  <Input placeholder="123 Main St, Anytown, ST 12345" value={form.property_address}
+                    onChange={e => setForm({ ...form, property_address: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label><User className="w-4 h-4 inline mr-1" />Owner Name (if known)</Label>
+                  <Input placeholder="John Smith" value={form.owner_name}
+                    onChange={e => setForm({ ...form, owner_name: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label><Phone className="w-4 h-4 inline mr-1" />Phone (if known)</Label>
+                  <Input placeholder="555-123-4567" value={form.phone}
+                    onChange={e => setForm({ ...form, phone: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label><Mail className="w-4 h-4 inline mr-1" />Email (if known)</Label>
+                  <Input placeholder="john@example.com" value={form.email}
+                    onChange={e => setForm({ ...form, email: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label><Building className="w-4 h-4 inline mr-1" />Company (if known)</Label>
+                  <Input placeholder="ABC Construction LLC" value={form.company}
+                    onChange={e => setForm({ ...form, company: e.target.value })} />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label><Database className="w-4 h-4 inline mr-1" />Google Sheet URL or ID (auto-export results)</Label>
+                  <Input placeholder="https://docs.google.com/spreadsheets/d/... or sheet ID" value={form.spreadsheet_url}
+                    onChange={e => setForm({ ...form, spreadsheet_url: e.target.value })} />
+                  <p className="text-xs text-muted-foreground">Results auto-export to the "Skip Traces" tab after each trace completes.</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                <div>
+                  <Label className="cursor-pointer font-medium">Deep Search Mode</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Adds 11 more methods: voter records, court records, professional licenses, DMV, military,
+                    tax/financial, government registries, church records, school/alumni, newspaper archives, and death confirmation.
+                  </p>
+                </div>
+                <Switch checked={deepSearch} onCheckedChange={setDeepSearch} />
+              </div>
+
+              <button
+                onClick={() => setShowSources(!showSources)}
+                className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showSources ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                View all {SKIP_TRACE_DEEP_CATALOG.length} deep search categories
+              </button>
+
+              {showSources && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3 rounded-lg border bg-muted/20">
+                  {SKIP_TRACE_DEEP_CATALOG.map(cat => (
+                    <div key={cat.id} className="p-2 rounded-md border bg-background">
+                      <p className="text-xs font-semibold flex items-center gap-1">
+                        <Database className="w-3 h-3 text-primary" />
+                        {cat.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-1">{cat.sources.length} sources</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <p className="text-xs font-semibold">Search authorization</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Required on every search. A permissible purpose, the specific legal matter and a case reference
+                  are recorded before any source is contacted.
+                </p>
+                <select
+                  value={form.permissible_purpose}
+                  onChange={(e) => setForm({ ...form, permissible_purpose: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Select permissible purpose…</option>
+                  {PURPOSE_OPTIONS.map(([id, label]) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+                <input
+                  value={form.legal_matter}
+                  onChange={(e) => setForm({ ...form, legal_matter: e.target.value })}
+                  placeholder="Legal matter (e.g. Estate of J. Doe, probate administration)"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                />
+                <input
+                  value={form.case_reference}
+                  onChange={(e) => setForm({ ...form, case_reference: e.target.value })}
+                  placeholder="Case / docket reference"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+
+              <Button onClick={handleSearch} disabled={searching} className="w-full">
+                {searching
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Searching {deepSearch ? "all 18 methods" : "7 core methods"}...</>
+                  : <><Radar className="w-4 h-4 mr-2" />Run {deepSearch ? "Deep" : "Standard"} Skip Trace</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {error && (
+            <Card className="border-destructive">
+              <CardContent className="pt-6 flex items-start gap-3 text-destructive">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Search Error</p>
+                  <p className="text-sm">{error}</p>
+                  {error.includes("credit") && (
+                    <p className="text-sm mt-2 text-muted-foreground">
+                      Integration credits reset on 2026-09-12. Upgrade your plan for immediate access.
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {result && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      {result.status === "found" ? <CheckCircle className="w-5 h-5 text-green-500" />
+                       : result.status === "partial" ? <AlertCircle className="w-5 h-5 text-yellow-500" />
+                       : <AlertCircle className="w-5 h-5 text-red-500" />}
+                      Trace Results
+                    </CardTitle>
+                    <CardDescription>
+                      {result.found_owner_name ? `Owner: ${result.found_owner_name}` : "Owner not identified"}
+                      {" — "}Confidence: {result.confidence_score}%
+                    </CardDescription>
+                  </div>
+                  <Badge variant={result.status === "found" ? "default" : "secondary"}>
+                    {result.status.toUpperCase()}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Phone Numbers */}
+                {result.phone_numbers?.length > 0 && (
+                  <div>
+                    <h3 className="font-medium mb-2 flex items-center gap-2"><Phone className="w-4 h-4" />Phone Numbers ({result.phone_numbers.length})</h3>
+                    <div className="space-y-2">
+                      {result.phone_numbers.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono">{p.number}</span>
+                            {p.type && <Badge variant="outline">{p.type}</Badge>}
+                            {p.source && <span className="text-xs text-muted-foreground">via {p.source}</span>}
+                          </div>
+                          <ConfidenceBar score={p.confidence || 0} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Emails */}
+                {result.emails?.length > 0 && (
+                  <div>
+                    <h3 className="font-medium mb-2 flex items-center gap-2"><Mail className="w-4 h-4" />Email Addresses ({result.emails.length})</h3>
+                    <div className="space-y-2">
+                      {result.emails.map((e, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono">{e.email}</span>
+                            {e.verified && <Badge variant="outline" className="text-green-600 border-green-600">Verified</Badge>}
+                            {e.source && <span className="text-xs text-muted-foreground">via {e.source}</span>}
+                          </div>
+                          <ConfidenceBar score={e.confidence || 0} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Addresses */}
+                {result.addresses?.length > 0 && (
+                  <div>
+                    <h3 className="font-medium mb-2 flex items-center gap-2"><MapPin className="w-4 h-4" />Addresses ({result.addresses.length})</h3>
+                    <div className="space-y-2">
+                      {result.addresses.map((a, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                          <div className="flex items-center gap-2">
+                            <span>{a.address}</span>
+                            {a.type && <Badge variant="outline">{a.type}</Badge>}
+                          </div>
+                          <ConfidenceBar score={a.confidence || 0} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Social Profiles */}
+                {result.social_profiles?.length > 0 && (
+                  <div>
+                    <h3 className="font-medium mb-2 flex items-center gap-2"><Globe className="w-4 h-4" />Social Profiles ({result.social_profiles.length})</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {result.social_profiles.map((s, i) => (
+                        <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted">
+                          <Badge variant="outline">{s.platform}</Badge>
+                          {s.bio && <span className="text-xs text-muted-foreground max-w-40 truncate">{s.bio}</span>}
+                          <span className="text-xs text-muted-foreground">{s.confidence}%</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Relatives */}
+                {result.relatives?.length > 0 && (
+                  <div>
+                    <h3 className="font-medium mb-2 flex items-center gap-2"><Users className="w-4 h-4" />Relatives & Associates ({result.relatives.length})</h3>
+                    <p className="text-xs text-muted-foreground mb-2">Click any individual to run a full skip trace on them</p>
+                    <div className="flex flex-wrap gap-2">
+                      {result.relatives.map((r, i) => (
+                        <button
+                          key={i}
+                          onClick={() => traceRelative(r)}
+                          disabled={searching}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-secondary/80 text-secondary-foreground border border-border hover:bg-primary/10 hover:border-primary/40 hover:text-primary transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={`Trace ${r.name}`}
+                        >
+                          <Search className="w-3 h-3" />
+                          {r.name}{r.relationship ? ` (${r.relationship})` : ""}
+                          {r.phone && ` — ${r.phone}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Meta */}
+                <div className="flex flex-wrap gap-4 pt-4 border-t text-sm text-muted-foreground">
+                  <span className="flex items-center gap-1"><Database className="w-4 h-4" />{result.sources?.length || 0} sources checked</span>
+                  <span className="flex items-center gap-1"><Search className="w-4 h-4" />{result.methods?.length || 0} methods used</span>
+                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />{(result.duration_ms / 1000).toFixed(1)}s</span>
+                  {result.sheet_export?.ok && (
+                    <span className="flex items-center gap-1 text-green-600"><CheckCircle className="w-4 h-4" />Exported to Sheet</span>
+                  )}
+                </div>
+
+                {/* Sources breakdown */}
+                {result.sources?.length > 0 && (
+                  <div className="pt-2">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Sources exhausted:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {result.sources.map((s, i) => (
+                        <Badge key={i} variant="outline" className="text-xs">{s}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* History Tab */}
+        <TabsContent value="history">
+          <Card>
+            <CardHeader>
+              <CardTitle>Trace History</CardTitle>
+              <CardDescription>Recent skip trace operations — click to view full results</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingHistory ? (
+                <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted" /></div>
+              ) : history.length === 0 ? (
+                <p className="text-center py-8 text-muted-foreground">No traces yet. Run your first skip trace in the Search tab.</p>
+              ) : (
+                <div className="space-y-2">
+                  {history.map((trace) => (
+                    <div key={trace.id} className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50 cursor-pointer"
+                      onClick={() => { setResult(trace); }}>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">
+                          {trace.target_property_address || trace.target_owner_name || trace.target_phone || trace.target_email || "—"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {trace.found_owner_name ? `Found: ${trace.found_owner_name}` : "Owner not found"}
+                          {" — "}{trace.found_phone_numbers?.length || 0} phones
+                          {" — "}{trace.found_emails?.length || 0} emails
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <Badge variant={trace.status === "found" ? "default" : trace.status === "partial" ? "secondary" : "outline"}>
+                          {trace.status}
+                        </Badge>
+                        <span className={`text-sm font-medium ${statusColor(trace.status)}`}>{trace.confidence_score}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

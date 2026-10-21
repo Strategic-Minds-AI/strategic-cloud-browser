@@ -1,0 +1,136 @@
+{
+  "name": "Sandbox",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "User-friendly sandbox name"
+    },
+    "description": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "creating",
+        "active",
+        "paused",
+        "terminated",
+        "failed",
+        "shadowing"
+      ],
+      "default": "creating"
+    },
+    "project_id": {
+      "type": "string",
+      "description": "Associated project"
+    },
+    "railway_service_id": {
+      "type": "string",
+      "description": "Railway service ID for this sandbox's backend"
+    },
+    "railway_domain": {
+      "type": "string",
+      "description": "Auto-provisioned Railway domain"
+    },
+    "engine_url": {
+      "type": "string",
+      "description": "Provisioned engine endpoint URL"
+    },
+    "api_key": {
+      "type": "string",
+      "description": "API key for this sandbox (hashed)"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scraper",
+          "headless_browser",
+          "form_filler",
+          "captcha_solver",
+          "clone_engine",
+          "ai_agent",
+          "proxy_rotation",
+          "stealth_mode"
+        ]
+      },
+      "default": [
+        "scraper",
+        "headless_browser"
+      ],
+      "description": "Enabled capabilities for this sandbox"
+    },
+    "max_sessions": {
+      "type": "number",
+      "default": 3
+    },
+    "max_browser_hours": {
+      "type": "number",
+      "default": 5
+    },
+    "region": {
+      "type": "string",
+      "default": "us-west"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the sandbox auto-terminates"
+    },
+    "last_activity_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provisioning_logs": {
+      "type": "string",
+      "description": "Logs from Railway provisioning"
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "shadow_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the sandbox continuously monitors the original site and re-syncs the clone when changes are detected"
+    },
+    "shadow_target_url": {
+      "type": "string",
+      "description": "The original URL being shadowed \u2014 the clone mirrors this site's changes"
+    },
+    "shadow_last_sync_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last time the shadow mode detected and synced a change"
+    },
+    "shadow_sync_count": {
+      "type": "number",
+      "default": 0,
+      "description": "How many times shadow mode has re-synced the clone"
+    },
+    "shadow_monitoring_interval": {
+      "type": "number",
+      "default": 60,
+      "description": "Seconds between shadow mode change checks"
+    }
+  },
+  "required": [
+    "name",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "created_by_id": "{{user.id}}"
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
+    "delete": {
+      "created_by_id": "{{user.id}}"
+    }
+  }
+}

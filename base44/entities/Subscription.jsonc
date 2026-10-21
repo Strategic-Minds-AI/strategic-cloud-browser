@@ -1,0 +1,191 @@
+{
+  "name": "Subscription",
+  "type": "object",
+  "properties": {
+    "plan_tier": {
+      "type": "string",
+      "enum": [
+        "free",
+        "developer",
+        "startup",
+        "enterprise"
+      ],
+      "default": "free",
+      "description": "Current subscription plan"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "trialing",
+        "past_due",
+        "canceled",
+        "expired"
+      ],
+      "default": "active"
+    },
+    "billing_cycle": {
+      "type": "string",
+      "enum": [
+        "monthly",
+        "annual",
+        "none"
+      ],
+      "default": "none"
+    },
+    "current_period_start": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "current_period_end": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "trial_ends_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "canceled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "max_concurrent_sessions": {
+      "type": "number",
+      "default": 1,
+      "description": "Concurrent browser session limit"
+    },
+    "max_browser_hours": {
+      "type": "number",
+      "default": 0.25,
+      "description": "Browser hours included per month (15 minutes on free)"
+    },
+    "max_agent_runs": {
+      "type": "number",
+      "default": 1,
+      "description": "Agent runs included per month"
+    },
+    "max_search_calls": {
+      "type": "number",
+      "default": 50
+    },
+    "max_fetch_calls": {
+      "type": "number",
+      "default": 50
+    },
+    "max_proxy_gb": {
+      "type": "number",
+      "default": 0,
+      "description": "Proxy bandwidth in GB"
+    },
+    "data_retention_days": {
+      "type": "number",
+      "default": 1
+    },
+    "captcha_solving_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "stealth_mode": {
+      "type": "string",
+      "enum": [
+        "none",
+        "basic",
+        "advanced"
+      ],
+      "default": "none"
+    },
+    "overage_rate_browser_hr": {
+      "type": "number",
+      "default": 0,
+      "description": "USD per browser hour over limit"
+    },
+    "overage_rate_search_1k": {
+      "type": "number",
+      "default": 0
+    },
+    "overage_rate_fetch_1k": {
+      "type": "number",
+      "default": 0
+    },
+    "overage_rate_proxy_gb": {
+      "type": "number",
+      "default": 0
+    },
+    "usage_browser_hours": {
+      "type": "number",
+      "default": 0,
+      "description": "Current period browser hours used"
+    },
+    "usage_agent_runs": {
+      "type": "number",
+      "default": 0
+    },
+    "usage_search_calls": {
+      "type": "number",
+      "default": 0
+    },
+    "usage_fetch_calls": {
+      "type": "number",
+      "default": 0
+    },
+    "usage_proxy_gb": {
+      "type": "number",
+      "default": 0
+    },
+    "stripe_customer_id": {
+      "type": "string"
+    },
+    "stripe_subscription_id": {
+      "type": "string"
+    },
+    "monthly_price_usd": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "plan_tier",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

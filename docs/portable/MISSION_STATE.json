@@ -1,0 +1,148 @@
+{
+  "mission": "X1-CLOUDBROWSER-ONE-AND-DONE-2026",
+  "result": "IN_PROGRESS",
+  "recorded_date": "2026-10-20",
+  "target": {
+    "base44_app_id": "6a837c8e995cc4824aabf594",
+    "github_repository": "XTREME-SYSTEMS/cloudbrowser-control",
+    "canonical_local_root": "C:\\_Strategic_Minds_AI_OS\\33_CLOUD_BROWSER"
+  },
+  "working_tree": {
+    "committed": true,
+    "commit_sha": "9ca7be3",
+    "commit_subject": "Initialize portable core architecture and database schema",
+    "branch": "main",
+    "remote": "github.com/XTREME-SYSTEMS/cloudbrowser-control",
+    "sync_state": "local main reported 0 ahead / 0 behind origin/main when recorded",
+    "risk": "This landed on main. The six Railway services that still auto-deploy on main with no watch paths (engine-2, engine-3, railway-operator, auto-construction-leads, hidden-property-intel-scraper, mcp-prod-validator) will have rebuilt from it. cloudbrowser-engine and cloudbrowser-control-staging both have auto-deploy off. Check Railway deploy history before further commits.",
+    "new_paths": [
+      ".env.example",
+      "docker-compose.yml",
+      "db/migrations/001_portable_core.sql",
+      "shared/package.json",
+      "shared/db.js",
+      "api/package.json",
+      "api/Dockerfile",
+      "api/server.js",
+      "api/openapi.json",
+      "api/lib/http.js",
+      "api/lib/auth.js",
+      "api/lib/jobs.js",
+      "api/routes/jobs.js",
+      "api/routes/sessions.js",
+      "worker/package.json",
+      "worker/Dockerfile",
+      "worker/worker.js",
+      "worker/lib/queue.js",
+      "worker/lib/queue-logic.js",
+      "tests/portable-core.contract.test.mjs",
+      "docs/portable/PHASE1_CAPABILITY_INVENTORY.md",
+      "docs/portable/PHASE2_PARITY_MATRIX.md",
+      "docs/portable/PHASE4_BASE44_DEPENDENCY_AUDIT.md"
+    ],
+    "modified_paths": []
+  },
+  "verified_evidence": {
+    "portable_core_contract_tests": { "command": "node --test tests/portable-core.contract.test.mjs", "tests": 41, "pass": 41, "fail": 0, "exit": 0 },
+    "autocomplete_source_contract": { "command": "node --test tests/autocomplete-source-contract.test.mjs", "tests": 10, "pass": 10, "fail": 0, "exit": 0 },
+    "engine_contract_tests": { "command": "node --test browser-engine/tests/*.test.js", "tests": 16, "pass": 16, "fail": 0, "exit": 0 },
+    "syntax_check": { "files": 10, "pass": 10, "fail": 0 },
+    "production_build": { "command": "npm run build", "exit": 0, "note": "vite build succeeded; dist/ produced" },
+    "lint": { "command": "npx eslint . --quiet", "exit": 0, "errors": 0 },
+    "test_totals": { "tests": 67, "pass": 67, "fail": 0 }
+  },
+  "portable_layer_counts": {
+    "source_files": 37,
+    "test_files_in_repo": 5,
+    "base44_imports_in_engine_operator_sdk": 0,
+    "base44_imports_in_api_worker_shared_db": 0
+  },
+  "phases": {
+    "phase1_forensic_discovery": "COMPLETE",
+    "phase2_competitive_benchmark": "PARTIAL — parity matrix written from cited vendor docs; harness NOT executed, so all performance cells are NOT MEASURED",
+    "phase3_rearchitecture": "PARTIAL — API gateway, durable worker, core schema, local stack built. AI provider layer and admin dashboard NOT started",
+    "phase4_dependency_removal": "INCOMPLETE — 145 frontend files, 113 entities, 207 functions, 23 workflows, 20 agents still coupled",
+    "phase5_portable_package": "PARTIAL — source in repository only; no downloadable archive produced",
+    "phase6_recursive_engineering": "IN_PROGRESS — one full ARCHITECT→IMPLEMENT→BUILD→TEST→DIAGNOSE→REPAIR→REGRESSION cycle completed with a real defect found and repaired",
+    "phase7_validation": "PARTIAL — unit/contract/build/lint/syntax executed. No integration, browser E2E, tenant-isolation, SSRF, or performance tests executed",
+    "phase8_cloud_deployment": "NOT ATTEMPTED — no staging target verified; production changes require explicit approval",
+    "phase9_operator_plugin_skills": "NOT STARTED",
+    "phase10_release_package": "PARTIAL — 3 audit documents + this state file; no manifest with commit SHA or checksums (no commit exists)"
+  },
+  "defects_found_and_repaired": [
+    {
+      "id": "D1",
+      "summary": "Isolation scan produced a false failure by treating a test fixture as runtime coupling",
+      "root_cause": "browser-engine/tests/skiptrace-integrity.test.js:47 reads src/pages/StrategicReport.jsx as a fixture and asserts it contains 'base44.entities.SkipTrace.filter('",
+      "repair": "Scan now distinguishes runtime coupling from test fixtures; added an explicit assertion that the four service entry points import nothing from the platform",
+      "verified": true
+    },
+    {
+      "id": "D2",
+      "summary": "Module type was implicit for the shared layer",
+      "root_cause": "root shared/ had no package.json, so ESM resolution depended on ambient detection",
+      "repair": "added shared/package.json with type:module",
+      "verified": true
+    },
+    {
+      "id": "D3",
+      "summary": "The environment template was silently excluded from the committed core",
+      "root_cause": ".gitignore carried '.env' and '.env.*' with no negation, so env.example was ignored and is absent from commit 9ca7be3",
+      "repair": "added a negation for env.example to .gitignore; the template is now committable",
+      "verified": true
+    },
+    {
+      "id": "D4",
+      "summary": "The engine's route prefix was recorded as unverified and is now confirmed correct",
+      "root_cause": "no evidence had been gathered for which prefix the engine serves",
+      "repair": "confirmed the engine mounts its router at '/' and '/engine' and serves no /v1 routes, so the gateway's unprefixed calls need no change",
+      "verified": true
+    }
+  ],
+  "security_findings": [
+    {
+      "id": "S1",
+      "severity": "medium",
+      "finding": "browser-engine/server.js generates session share tokens with Math.random().toString(36).slice(2), which is not a cryptographically secure generator",
+      "status": "REPORTED — not repaired (engine was intentionally left untouched to avoid triggering a production deploy)"
+    },
+    {
+      "id": "S2",
+      "severity": "medium",
+      "finding": "the engine exposes no tenant field on sessions, so tenant isolation for sessions depends entirely on the new gateway session_owners table; a session created by calling the engine directly is denied by the gateway (fail-closed)",
+      "status": "MITIGATED by design — documented in db/migrations/001_portable_core.sql"
+    },
+    {
+      "id": "S3",
+      "severity": "low",
+      "finding": "API rate limiting is in-process, therefore per replica rather than global",
+      "status": "ACCEPTED LIMITATION — requires a shared store to fix"
+    },
+    {
+      "id": "S4",
+      "severity": "medium",
+      "finding": "api/, worker/ and browser-engine/ ship no committed lockfiles. browser-engine is the worst case: it is deployed and depends on express, playwright, ws and @supabase/supabase-js, so its builds are not reproducible. shared/ declares no dependencies and needs none; python-sdk/ is not deployed",
+      "status": "OPEN — requires npm install --package-lock-only in each of the three directories"
+    },
+    {
+      "id": "S5",
+      "severity": "unknown",
+      "finding": "the environment template could not be inspected: the platform blocks reads of env-pattern paths from both bash and the file tools, so whether it lists variable NAMES only, or also carries values, is UNVERIFIED",
+      "status": "OPEN — a human or the external operator must confirm it holds names only before it is committed"
+    }
+  ],
+  "blockers": [
+    "Railway blast radius: commit 9ca7be3 reached main, so every service that auto-deploys on main without watch paths was triggered by it. Only cloudbrowser-engine has a safe watch path identified so far (browser-engine/**). cloudbrowser-control-staging cannot be scoped until its Root Directory and Dockerfile path are known.",
+    "Railway / Vercel / Supabase: no staging deployment attempted. No repository-connected staging target was verified, and modifying production services, secrets, schemas or DNS requires explicit approval.",
+    "Lockfiles: cannot be generated in this environment (no registry install of express/pg/playwright performed).",
+    "Independent validation (Guardian): NO independent validator executed. Marked BLOCKED rather than self-certified.",
+    "Frontend port: 145 files still import the platform client. Not attempted in this batch.",
+    "Data/function port: 108 of 113 entity schemas and 207 of 207 backend functions are unported.",
+    "Operator plugin / skills package: not created; no ChatGPT plugin installation is possible from this environment.",
+    "Partly closed: the engine mounts its router at both '/' and '/engine' (browser-engine/server.js:1408-1409) and serves no /v1 routes, so the gateway's unprefixed '/sessions' and '/health' calls are correct. Still unverified: the single-session GET response BODY shape, so the gateway accepts either a bare session object or a { session } envelope. Read browser-engine/server.js:1061 and tighten.",
+    "No downloadable source archive: this environment exposes repository files, not a packaged zip.",
+    "Unverified environment template: .gitignore has been changed to allow the env template through, but its contents could not be read with the available tools (env-pattern paths are blocked). Confirm it lists variable names only before it is committed. See security finding S5.",
+    "cloudbrowser-control-staging cannot be given a watch path until its Root Directory and Dockerfile path are known; scoping it incorrectly would silently stop its deploys."
+  ],
+  "next_action": "Confirm the Railway watch-path / branch policy for the repository, then commit the portable core and generate api/ and worker/ lockfiles. After that, port the first vertical slice of the frontend off @/api/base44Client."
+}

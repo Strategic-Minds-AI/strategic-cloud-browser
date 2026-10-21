@@ -1,0 +1,165 @@
+{
+  "name": "KeywordIntelligence",
+  "type": "object",
+  "properties": {
+    "topic": {
+      "type": "string",
+      "description": "Topic researched, or 'General trending searches' for broad runs"
+    },
+    "run_type": {
+      "type": "string",
+      "enum": [
+        "broad",
+        "topic"
+      ],
+      "default": "broad",
+      "description": "broad = all-niche trending sweep; topic = focused on a specific topic"
+    },
+    "top_words": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "word": {
+            "type": "string"
+          },
+          "search_volume_estimate": {
+            "type": "string"
+          },
+          "trend_direction": {
+            "type": "string",
+            "enum": [
+              "rising",
+              "stable",
+              "declining"
+            ]
+          },
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "word",
+          "trend_direction"
+        ]
+      },
+      "default": [],
+      "description": "Top searched words / keywords"
+    },
+    "top_categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "search_volume_estimate": {
+            "type": "string"
+          },
+          "trend_direction": {
+            "type": "string",
+            "enum": [
+              "rising",
+              "stable",
+              "declining"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "trend_direction"
+        ]
+      },
+      "default": [],
+      "description": "Hottest search categories"
+    },
+    "top_phrases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "phrase": {
+            "type": "string"
+          },
+          "search_volume_estimate": {
+            "type": "string"
+          },
+          "trend_direction": {
+            "type": "string",
+            "enum": [
+              "rising",
+              "stable",
+              "declining"
+            ]
+          }
+        },
+        "required": [
+          "phrase",
+          "trend_direction"
+        ]
+      },
+      "default": [],
+      "description": "Top long-tail search phrases / queries"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Executive summary of what's trending and why it matters"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Source URLs / publications used for the research"
+    },
+    "triggered_by": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled"
+      ],
+      "default": "manual"
+    },
+    "run_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "alert_sent": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the admin alert (notification + email) was delivered"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Populated if the research run failed"
+    }
+  },
+  "required": [
+    "topic",
+    "run_type"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

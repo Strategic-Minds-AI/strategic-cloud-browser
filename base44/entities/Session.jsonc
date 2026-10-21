@@ -1,0 +1,188 @@
+{
+  "name": "Session",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Engine-side browser session ID"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "idle",
+        "ended",
+        "errored",
+        "timed_out",
+        "pooled"
+      ],
+      "default": "pending"
+    },
+    "target_url": {
+      "type": "string"
+    },
+    "viewport": {
+      "type": "object"
+    },
+    "user_agent": {
+      "type": "string"
+    },
+    "locale": {
+      "type": "string"
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "geolocation": {
+      "type": "object"
+    },
+    "proxy_id": {
+      "type": "string"
+    },
+    "headers": {
+      "type": "object"
+    },
+    "blocked_resources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeout_ms": {
+      "type": "number",
+      "default": 30000
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "current_url": {
+      "type": "string"
+    },
+    "current_title": {
+      "type": "string"
+    },
+    "record_video": {
+      "type": "boolean",
+      "default": false
+    },
+    "video_url": {
+      "type": "string",
+      "description": "URL to recorded session video"
+    },
+    "enable_cdp": {
+      "type": "boolean",
+      "default": false
+    },
+    "cdp_url": {
+      "type": "string",
+      "description": "Chrome DevTools Protocol endpoint URL"
+    },
+    "profile_id": {
+      "type": "string",
+      "description": "Reference to Profile entity"
+    },
+    "extension_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pool_id": {
+      "type": "string"
+    },
+    "resume_token": {
+      "type": "string",
+      "description": "Token for resuming session state"
+    },
+    "share_token": {
+      "type": "string",
+      "description": "Token for sharing session live view"
+    },
+    "network_mocks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "description": "Browser fingerprint config: platform, plugins, fonts, canvas_noise, webdriver"
+    },
+    "tls_fingerprint": {
+      "type": "object",
+      "description": "TLS/JA3 fingerprint config: { ja3_hash, ja4, tls_version, cipher_suites, extensions, alpn }"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "tabs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Multi-tab state tracking"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}
