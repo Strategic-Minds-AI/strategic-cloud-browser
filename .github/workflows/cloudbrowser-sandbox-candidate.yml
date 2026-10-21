@@ -1,0 +1,23 @@
+name: CloudBrowser Chromium Sandbox Candidate
+on:
+  push:
+    branches: ["security/cloudbrowser-sandbox-isolation-20261021"]
+    paths:
+      - "browser-engine/**"
+      - ".github/workflows/cloudbrowser-sandbox-candidate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Syntax and sandbox source checks
+        run: |
+          node --check browser-engine/server.js
+          node --test browser-engine/tests/sandbox-isolation.test.mjs
