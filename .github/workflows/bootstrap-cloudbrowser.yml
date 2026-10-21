@@ -29,7 +29,7 @@ jobs:
           git clone --filter=blob:none https://github.com/XTREME-SYSTEMS/cloudbrowser-control.git /tmp/cloudbrowser-source
           git -C /tmp/cloudbrowser-source checkout --detach f45e86a651a877bbd9c340e3ebefd65a8167ae5b
           test "$(git -C /tmp/cloudbrowser-source rev-parse HEAD)" = f45e86a651a877bbd9c340e3ebefd65a8167ae5b
-          rsync -a --exclude='.git/' --exclude='.github/' --exclude='.env' --exclude='.env.*' --exclude='node_modules/' --exclude='dist/' /tmp/cloudbrowser-source/ ./
+          rsync -a --exclude='.git/' --exclude='.github/' --include='/.env.example' --exclude='.env' --exclude='.env.*' --exclude='node_modules/' --exclude='dist/' /tmp/cloudbrowser-source/ ./
           test -f api/package.json
           test -f worker/package.json
           test -f browser-engine/package.json
