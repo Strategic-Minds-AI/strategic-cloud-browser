@@ -33,7 +33,7 @@ jobs:
           test -f api/package.json
           test -f worker/package.json
           test -f browser-engine/package.json
-          cp ci/release-gate.yml .github/workflows/release-gate.yml
+          # Release gate workflow is installed separately by the authenticated GitHub connector.
           cat > SOURCE_IMPORT_RECEIPT.json <<'EOF'
           {
             "source_repo": "XTREME-SYSTEMS/cloudbrowser-control",
