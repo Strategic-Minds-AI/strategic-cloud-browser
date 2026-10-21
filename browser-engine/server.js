@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import { chromium } from "playwright";
+import { validateTargetUrl as checkTargetUrl, installOutboundGuard } from "./network-policy.js";
 // Interactive challenges are never solved automatically by this runtime.
 // TASK 8: Fingerprint + human behavior modules
 import { generateFingerprint, getFingerprintInitScript } from './fingerprint-randomizer.js';
@@ -105,42 +106,11 @@ api.use((req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════
-// SSRF protection: block private/loopback/metadata
+// SSRF defense: request-wide policy plus mandatory network-level egress rules.
+// DNS preflight by itself cannot eliminate connection-time DNS rebinding.
 // ═══════════════════════════════════════════════
-
-function isBlockedHost(hostname) {
-  if (!hostname) return true;
-  const h = hostname.toLowerCase();
-  // Loopback
-  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return true;
-  // Cloud metadata
-  if (h === "169.254.169.254" || h === "metadata.google.internal") return true;
-  // IPv6 private/link-local
-  if (h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
-  // Private ranges
-  if (h.endsWith(".internal") || h.endsWith(".local")) return true;
-  const parts = h.split(".").map(Number);
-  if (parts.length === 4) {
-    const [a, b] = parts;
-    if (a === 10) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    if (a === 0) return true;
-    if (a === 127) return true;
-    if (a >= 224) return true; // multicast/reserved
-  }
-  return false;
-}
-
 function validateTargetUrl(urlStr) {
-  if (!urlStr || typeof urlStr !== "string") return { ok: false, error: "URL required" };
-  let parsed;
-  try { parsed = new URL(urlStr); } catch { return { ok: false, error: "Invalid URL" }; }
-  if (ENFORCE_HTTPS && parsed.protocol !== "https:") return { ok: false, error: "HTTPS required by policy" };
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { ok: false, error: "Only http/https allowed" };
-  if (isBlockedHost(parsed.hostname)) return { ok: false, error: `Blocked host: ${parsed.hostname}` };
-  return { ok: true, parsed };
+  return checkTargetUrl(urlStr, { enforceHttps: ENFORCE_HTTPS });
 }
 
 // ═══════════════════════════════════════════════
@@ -296,7 +266,8 @@ async function warmPool() {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
       });
-      const context = await browser.newContext();
+      const context = await browser.newContext({ serviceWorkers: "block" });
+      await installOutboundGuard(context, { enforceHttps: ENFORCE_HTTPS });
       await context.addInitScript(buildStealthScript("pool_" + Math.random().toString(36).slice(2)));
       const page = await context.newPage();
       const id = uid();
@@ -313,10 +284,6 @@ async function warmPool() {
 
 // Interactive verification challenges require manual authorization.
 // No automatic CAPTCHA solvers or third-party token services are enabled.
-async function solveGoogleSorryCaptcha() {
-  return null;
-}
-
 async function autoSolveCaptcha() {
   return { detected: false, solved: false, manual_required: true, reason: "manual_verification_required" };
 }
@@ -458,7 +425,7 @@ api.get("/config", (req, res) => {
     workerId: WORKER_ID, region: REGION, engineVersion: ENGINE_VERSION, schemaVersion: SCHEMA_VERSION,
     features: {
       videoRecording: true, cdpDebugging: true, sessionPooling: true, sessionResume: true,
-      extensions: true, captchaSolving: true, networkMocking: true, sessionSharing: true,
+      extensions: true, captchaSolving: false, networkMocking: true, sessionSharing: true,
       boundedCrawl: true, pagination: true, evaluate: true, frameSwitch: true, cookieImportExport: true,
     },
   });
@@ -471,6 +438,10 @@ api.get("/config", (req, res) => {
 api.post("/sessions", async (req, res) => {
   try {
     const opts = req.body || {};
+    // These options can bypass network controls or access the host filesystem.
+    if (opts.proxy || opts.proxyPool?.length || opts.extensions?.length || opts.enableCDP || opts.userDataDir) {
+      return res.status(400).json({ error: "Unsupported unsafe session configuration" });
+    }
 
     // Use pool if available
     if (opts.usePool && pool.length > 0) {
@@ -480,7 +451,6 @@ api.post("/sessions", async (req, res) => {
         await sessionManager.setStatus(pooledId, "active");
         // Merge per-session opts that pooled sessions don't have yet
         // (captcha solver config, proxy, headers, etc.)
-        s.captchaSolver = opts.captchaSolver || null;
         warmPool();
         return res.json({
           sessionId: s.id, status: "idle", fromPool: true,
@@ -513,6 +483,7 @@ api.post("/sessions", async (req, res) => {
     }
 
     const contextOptions = {
+      serviceWorkers: "block",
       viewport: opts.viewport || { width: 1280, height: 720 },
       userAgent: opts.userAgent, locale: opts.locale, timezoneId: opts.timezone,
       geolocation: opts.geolocation, extraHTTPHeaders: opts.headers,
@@ -569,16 +540,6 @@ api.post("/sessions", async (req, res) => {
       }, { storageByOrigin });
     }
 
-    // A resumed context is not useful until it is on the saved target.
-    // Navigation happens only after cookies + origin storage restoration hooks
-    // are installed, so authenticated state is available during page startup.
-    if (opts.target_url) {
-      await page.goto(opts.target_url, {
-        waitUntil: opts.waitUntil || "domcontentloaded",
-        timeout: opts.timeout || 60000,
-      });
-    }
-
     // Network mocking
     if (opts.networkMocks?.length > 0) {
       for (const mock of opts.networkMocks) {
@@ -594,13 +555,25 @@ api.post("/sessions", async (req, res) => {
       });
     }
 
+    // Last registered context route executes first in Playwright.
+    await installOutboundGuard(context, { enforceHttps: ENFORCE_HTTPS });
+
+    // Initial navigation and all subsequent redirect/resource requests are checked.
+    if (opts.target_url) {
+      const validation = validateTargetUrl(opts.target_url);
+      if (!validation.ok) return res.status(400).json({ error: validation.error });
+      await page.goto(opts.target_url, {
+        waitUntil: opts.waitUntil || "domcontentloaded",
+        timeout: opts.timeout || 60000,
+      });
+    }
+
     const id = uid();
     const session = {
       id, browser, context, page, status: "idle", url: "", title: "",
       lastActivity: Date.now(), createdAt: Date.now(), consoleLogs: [], networkLogs: [],
       recordVideo: !!opts.recordVideo, cdpUrl, userDataDir: opts.userDataDir,
       // Captcha auto-solver config (injected by gateway when captcha_solver: true)
-      captchaSolver: opts.captchaSolver || null,
       // TASK 8: Human behavior level for clicks/typing
       behaviorLevel: opts.behaviorLevel || 'low',
       antiBotSystem: opts.antiBotSystem || null,
@@ -666,78 +639,9 @@ api.post("/sessions/:id/execute", async (req, res) => {
 
     switch (action_type) {
       case "goto": {
-        // Block reCAPTCHA scripts when captcha solver is configured.
-        // We intercept the HTML response and strip reCAPTCHA script tags from it,
-        // preventing the reCAPTCHA JS from consuming the data-s variable on Google's
-        // /sorry/ page. This keeps data-s fresh for 2captcha to solve.
-        if (s.captchaSolver) {
-          await page.route("**/*", async (route) => {
-            const reqUrl = route.request().url();
-            // Abort reCAPTCHA script/iframe requests directly
-            if (reqUrl.includes("recaptcha/enterprise.js") ||
-                reqUrl.includes("gstatic.com/recaptcha/") ||
-                reqUrl.includes("recaptcha/api.js") ||
-                reqUrl.includes("recaptcha/api2/") ||
-                reqUrl.includes("recaptcha/enterprise/")) {
-              return route.abort();
-            }
-            // For HTML document responses, strip reCAPTCHA script tags
-            if (route.request().resourceType() === "document") {
-              try {
-                const response = await route.fetch();
-                const body = await response.text();
-                // Only modify if the page contains reCAPTCHA
-                if (body.includes("recaptcha")) {
-                  const stripped = body
-                    .replace(/<script[^>]*recaptcha[^>]*><\/script>/gi, "")
-                    .replace(/<script[^>]*src=["'][^"']*gstatic\.com\/recaptcha[^"']*["'][^>]*><\/script>/gi, "");
-                  return route.fulfill({
-                    status: response.status(),
-                    headers: { ...response.headers(), "content-length": String(stripped.length) },
-                    body: stripped,
-                  });
-                }
-                // Page doesn't have reCAPTCHA — fulfill with original response
-                return route.fulfill({
-                  status: response.status(),
-                  headers: response.headers(),
-                  body: body,
-                });
-              } catch (_e) {
-                return route.continue();
-              }
-            }
-            return route.continue();
-          });
-        }
         await page.goto(value || selector, { waitUntil: options.waitUntil || "domcontentloaded", timeout: options.timeout || DEFAULT_TIMEOUT });
         s.url = page.url(); s.title = await page.title();
         result.url = s.url; result.title = s.title;
-        // Auto-solve captcha if session has captcha solver configured
-        if (s.captchaSolver) {
-          // Google /sorry/ page needs special handling (data-s parameter, form submission)
-          const sorryResult = await solveGoogleSorryCaptcha(page, s.captchaSolver);
-          if (sorryResult) {
-            result.captcha = sorryResult;
-            if (sorryResult.solved) {
-              s.url = page.url(); s.title = await page.title().catch(() => s.title);
-              result.url = s.url; result.title = s.title;
-            }
-            break;
-          }
-          // Standard captcha solving for non-Google pages
-          const captchaResult = await autoSolveCaptcha(page, s.captchaSolver);
-          // Always include captcha result in response — even when not detected,
-          // so the caller knows auto-solve was attempted
-          result.captcha = captchaResult;
-          if (captchaResult.detected) {
-            s.url = page.url(); s.title = await page.title().catch(() => s.title);
-            result.url = s.url; result.title = s.title;
-          }
-        } else {
-          // No captcha solver configured — note it in the response
-          result.captcha = { detected: false, solved: false, reason: "no_captcha_solver_configured" };
-        }
         break;
       }
       case "back": { await page.goBack({ timeout: options.timeout || DEFAULT_TIMEOUT }); s.url = page.url(); result.url = s.url; break; }
