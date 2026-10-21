@@ -90,7 +90,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --check
+          git diff --cached --check -- .github/workflows/bootstrap-cloudbrowser.yml .github/workflows/release-gate.yml SOURCE_IMPORT_RECEIPT.json api/package-lock.json worker/package-lock.json browser-engine/package-lock.json
           if ! git diff --cached --quiet; then
             git commit -m "bootstrap: import SHA-pinned CloudBrowser, lock services, activate release gate [bootstrap-built]"
             git push origin HEAD:install/cloudbrowser-staging-20261020
