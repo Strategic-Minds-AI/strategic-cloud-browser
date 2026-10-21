@@ -178,6 +178,52 @@ jobs:
           test "$EXIT" -ne 0
           printf '%s\n' "$OUTPUT" | grep -q 'ENGINE_API_KEY must be set'
 
+      - name: Disposable container API and browser session E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create cloudbrowser-ci-net
+          trap 'docker rm -f cb-ci-api cb-ci-engine cb-ci-db >/dev/null 2>&1 || true; docker network rm cloudbrowser-ci-net >/dev/null 2>&1 || true' EXIT
+          docker run -d --name cb-ci-db --network cloudbrowser-ci-net \
+            -e POSTGRES_PASSWORD=ci-disposable-password \
+            -e POSTGRES_DB=cloudbrowser_qa postgres:17-alpine
+          for attempt in $(seq 1 30); do
+            if docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -Atqc "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec -i cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 < db/migrations/001_portable_core.sql
+          docker exec -i cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 < db/migrations/002_secure_api_auth.sql
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE cloudbrowser_api_login LOGIN PASSWORD 'ci-only-role-password'; GRANT cloudbrowser_api TO cloudbrowser_api_login;"
+          export CB_SECRET_A='abcdefghijklmnopqrstuvwx01234567'
+          export CB_SECRET_B='zyxwvutsrqponmlkjihgfedcba765432'
+          export CB_PEPPER='ci-only-HMAC-pepper'
+          HASH_A=$(node --input-type=module -e 'import {hashApiKey} from "./api/lib/http.js"; console.log(hashApiKey(process.env.CB_SECRET_A,process.env.CB_PEPPER))')
+          HASH_B=$(node --input-type=module -e 'import {hashApiKey} from "./api/lib/http.js"; console.log(hashApiKey(process.env.CB_SECRET_B,process.env.CB_PEPPER))')
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO tenants (id,slug,display_name) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','CI Tenant A'),('00000000-0000-4000-8000-0000000000b2','ci-b','CI Tenant B');"
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO api_keys(tenant_id,label,environment,prefix,key_hash,scopes) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','cb_test','qaabcdef','$HASH_A',ARRAY['sessions:read','sessions:write']),('00000000-0000-4000-8000-0000000000b2','ci-b','cb_test','qaabcde1','$HASH_B',ARRAY['sessions:read','sessions:write']);"
+          docker run -d --name cb-ci-engine --network cloudbrowser-ci-net \
+            -e ENGINE_API_KEY=ci-only-engine-key-0123456789abcdef \
+            -e POOL_SIZE=0 -e MAX_SESSIONS=2 -e ENFORCE_HTTPS=true \
+            cloudbrowser-engine:smoke
+          docker run -d --name cb-ci-api --network cloudbrowser-ci-net \
+            -p 127.0.0.1:41000:4000 \
+            -e DATABASE_URL=postgresql://cloudbrowser_api_login:ci-only-role-password@cb-ci-db:5432/cloudbrowser_qa \
+            -e API_KEY_PEPPER="$CB_PEPPER" \
+            -e ENGINE_URL=http://cb-ci-engine:8080 \
+            -e ENGINE_API_KEY=ci-only-engine-key-0123456789abcdef \
+            cloudbrowser-api:smoke
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:41000/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          export CB_E2E_BASE_URL=http://127.0.0.1:41000
+          export CB_E2E_API_KEY_A="cb_test_qaabcdef_${CB_SECRET_A}"
+          export CB_E2E_API_KEY_B="cb_test_qaabcde1_${CB_SECRET_B}"
+          node scripts/portable-e2e.mjs
+
   db-isolation:
     name: PostgreSQL 17 RLS Negative Integration
     runs-on: ubuntu-latest
