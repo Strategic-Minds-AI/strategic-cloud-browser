@@ -69,7 +69,7 @@ try {
     key: keyA, method: "POST", data: { action_type: "extract_html" }
   });
   assert.equal(fullHtml.status, 200, "selector-free HTML: " + JSON.stringify(fullHtml.body).slice(0, 500));
-  assert.ok(typeof fullHtml.body.data === "string" && /<html[\\s>]/i.test(fullHtml.body.data),
+  assert.ok(typeof fullHtml.body.data === "string" && fullHtml.body.data.toLowerCase().includes("<html"),
     "selector-free HTML should produce a full HTML document");
 
   const unsafe = await request("/v1/sessions/" + encodeURIComponent(sessionId) + "/execute", {
