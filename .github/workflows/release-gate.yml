@@ -115,10 +115,18 @@ jobs:
           fi
           echo "PASS: No hardcoded API keys in source"
 
-      - name: Check SSRF guards
+      - name: Verify SSRF policy and denial regressions
         run: |
-          grep -q "isBlockedHost" browser-engine/server.js || { echo "FAIL: SSRF guard not found in engine"; exit 1; }
-          echo "PASS: SSRF guards present"
+          set -euo pipefail
+          test -f browser-engine/network-policy.js
+          grep -q "installOutboundGuard" browser-engine/server.js
+          node --check browser-engine/network-policy.js
+          node --test browser-engine/tests/network-policy.test.js
+          if grep -q 'solveGoogleSorryCaptcha' browser-engine/server.js; then
+            echo "FAIL: retired challenge solver referenced in runtime"
+            exit 1
+          fi
+          echo "PASS: executable URL/DNS guard regressions and no retired solver"
 
       - name: Check RLS enabled on all entities
         run: |
