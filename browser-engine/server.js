@@ -53,7 +53,7 @@ if (!fs.existsSync(VIDEO_DIR)) fs.mkdirSync(VIDEO_DIR, { recursive: true });
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow same-origin (no origin) and allowlisted origins
-    if (!origin || CORS_ALLOWLIST.length === 0 || CORS_ALLOWLIST.includes(origin)) {
+    if (!origin || CORS_ALLOWLIST.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`Origin ${origin} not allowed by CORS`));
@@ -424,8 +424,8 @@ api.get("/config", (req, res) => {
     maxSessions: MAX_SESSIONS, activeSessions: sessions.size, poolSize: pool.length, poolCapacity: POOL_SIZE,
     workerId: WORKER_ID, region: REGION, engineVersion: ENGINE_VERSION, schemaVersion: SCHEMA_VERSION,
     features: {
-      videoRecording: true, cdpDebugging: true, sessionPooling: true, sessionResume: true,
-      extensions: true, captchaSolving: false, networkMocking: true, sessionSharing: true,
+      videoRecording: true, cdpDebugging: false, sessionPooling: true, sessionResume: true,
+      extensions: false, captchaSolving: false, networkMocking: true, sessionSharing: true,
       boundedCrawl: true, pagination: true, evaluate: true, frameSwitch: true, cookieImportExport: true,
     },
   });
@@ -436,11 +436,18 @@ api.get("/config", (req, res) => {
 // ═══════════════════════════════════════════════
 
 api.post("/sessions", async (req, res) => {
+  let browser, context, page;
   try {
     const opts = req.body || {};
     // These options can bypass network controls or access the host filesystem.
     if (opts.proxy || opts.proxyPool?.length || opts.extensions?.length || opts.enableCDP || opts.userDataDir) {
       return res.status(400).json({ error: "Unsupported unsafe session configuration" });
+    }
+
+    // Reject unsafe initial targets before allocating a browser context.
+    if (opts.target_url) {
+      const initial = validateTargetUrl(opts.target_url);
+      if (!initial.ok) return res.status(400).json({ error: initial.error });
     }
 
     // Use pool if available
@@ -491,7 +498,6 @@ api.post("/sessions", async (req, res) => {
     if (opts.proxy) contextOptions.proxy = { server: opts.proxy.server, username: opts.proxy.username, password: opts.proxy.password };
     if (opts.recordVideo) contextOptions.recordVideo = { dir: VIDEO_DIR };
 
-    let browser, context, page;
     // Proxy rotation — pick from proxyPool (round-robin) if provided (Browserbase parity)
     let effectiveProxy = opts.proxy;
     if (!effectiveProxy && opts.proxyPool?.length > 0) {
@@ -573,7 +579,6 @@ api.post("/sessions", async (req, res) => {
       id, browser, context, page, status: "idle", url: "", title: "",
       lastActivity: Date.now(), createdAt: Date.now(), consoleLogs: [], networkLogs: [],
       recordVideo: !!opts.recordVideo, cdpUrl, userDataDir: opts.userDataDir,
-      // Captcha auto-solver config (injected by gateway when captcha_solver: true)
       // TASK 8: Human behavior level for clicks/typing
       behaviorLevel: opts.behaviorLevel || 'low',
       antiBotSystem: opts.antiBotSystem || null,
@@ -592,7 +597,12 @@ api.post("/sessions", async (req, res) => {
       createdAt: new Date(session.createdAt).toISOString(),
       expiresAt: new Date(session.createdAt + SESSION_TTL_MS).toISOString(),
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    // A failed browser launch/navigation must not leak a process or context.
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    res.status(500).json({ error: "Session creation failed" });
+  }
 });
 
 // ═══════════════════════════════════════════════
