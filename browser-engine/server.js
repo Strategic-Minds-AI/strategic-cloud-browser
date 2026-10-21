@@ -2,12 +2,13 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import { chromium } from "playwright";
-// Self-hosted CAPTCHA solver — zero external API dependency.
-import { solveCaptchaSelf } from './captcha-self-solver.js';
+import { validateTargetUrl as checkTargetUrl, installOutboundGuard } from "./network-policy.js";
+// Interactive challenges are never solved automatically by this runtime.
 // TASK 8: Fingerprint + human behavior modules
 import { generateFingerprint, getFingerprintInitScript } from './fingerprint-randomizer.js';
 import { humanClick, humanType, generateMousePath, humanDelay } from './human-behavior.js';
 import SessionManager from './session-manager.js';
+import { extractText, extractHtml } from "./extract-content.js";
 
 
 const app = express();
@@ -53,7 +54,7 @@ if (!fs.existsSync(VIDEO_DIR)) fs.mkdirSync(VIDEO_DIR, { recursive: true });
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow same-origin (no origin) and allowlisted origins
-    if (!origin || CORS_ALLOWLIST.length === 0 || CORS_ALLOWLIST.includes(origin)) {
+    if (!origin || CORS_ALLOWLIST.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`Origin ${origin} not allowed by CORS`));
@@ -106,42 +107,11 @@ api.use((req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════
-// SSRF protection: block private/loopback/metadata
+// SSRF defense: request-wide policy plus mandatory network-level egress rules.
+// DNS preflight by itself cannot eliminate connection-time DNS rebinding.
 // ═══════════════════════════════════════════════
-
-function isBlockedHost(hostname) {
-  if (!hostname) return true;
-  const h = hostname.toLowerCase();
-  // Loopback
-  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return true;
-  // Cloud metadata
-  if (h === "169.254.169.254" || h === "metadata.google.internal") return true;
-  // IPv6 private/link-local
-  if (h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
-  // Private ranges
-  if (h.endsWith(".internal") || h.endsWith(".local")) return true;
-  const parts = h.split(".").map(Number);
-  if (parts.length === 4) {
-    const [a, b] = parts;
-    if (a === 10) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    if (a === 0) return true;
-    if (a === 127) return true;
-    if (a >= 224) return true; // multicast/reserved
-  }
-  return false;
-}
-
 function validateTargetUrl(urlStr) {
-  if (!urlStr || typeof urlStr !== "string") return { ok: false, error: "URL required" };
-  let parsed;
-  try { parsed = new URL(urlStr); } catch { return { ok: false, error: "Invalid URL" }; }
-  if (ENFORCE_HTTPS && parsed.protocol !== "https:") return { ok: false, error: "HTTPS required by policy" };
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { ok: false, error: "Only http/https allowed" };
-  if (isBlockedHost(parsed.hostname)) return { ok: false, error: `Blocked host: ${parsed.hostname}` };
-  return { ok: true, parsed };
+  return checkTargetUrl(urlStr, { enforceHttps: ENFORCE_HTTPS });
 }
 
 // ═══════════════════════════════════════════════
@@ -295,9 +265,11 @@ async function warmPool() {
     try {
       const browser = await chromium.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        chromiumSandbox: true,
+        args: ["--disable-dev-shm-usage"],
       });
-      const context = await browser.newContext();
+      const context = await browser.newContext({ serviceWorkers: "block" });
+      await installOutboundGuard(context, { enforceHttps: ENFORCE_HTTPS });
       await context.addInitScript(buildStealthScript("pool_" + Math.random().toString(36).slice(2)));
       const page = await context.newPage();
       const id = uid();
@@ -312,445 +284,10 @@ async function warmPool() {
   }
 }
 
-// Multi-provider CAPTCHA — Browserbase parity.
-// Supports: recaptcha_v2, recaptcha_v3, hcaptcha, turnstile, funcaptcha, image.
-// Providers: 2captcha, anticaptcha, capmonster (selected via options.provider).
-async function solveCaptcha(page, options) {
-  const apiKey = options.apiKey;
-  if (!apiKey) throw new Error("CAPTCHA API key required");
-  const provider = options.provider || "2captcha";
-  const pageurl = page.url();
-  const maxWait = options.maxWait || 150000;
-  const pollInterval = 5000;
-
-  // Provider endpoint selector
-  const endpoints = {
-    "2captcha": { submit: "https://2captcha.com/in.php", poll: "https://2captcha.com/res.php" },
-    "anticaptcha": { submit: "https://api.anti-captcha.com/createTask", poll: "https://api.anti-captcha.com/getTaskResult" },
-    "capmonster": { submit: "https://api.capmonster.cloud/createTask", poll: "https://api.capmonster.cloud/getTaskResult" },
-  };
-  const ep = endpoints[provider] || endpoints["2captcha"];
-
-  // Build the submit payload per provider + type
-  let submitBody, captchaId, taskType;
-  const type = options.type;
-
-  if (provider === "2captcha") {
-    const methodMap = {
-      recaptcha_v2: "userrecaptcha",
-      recaptcha_v3: "userrecaptcha",
-      recaptcha_enterprise: "userrecaptcha",
-      hcaptcha: "hcaptcha",
-      turnstile: "turnstile",
-      funcaptcha: "funcaptcha",
-    };
-    const method = methodMap[type];
-    if (!method) throw new Error(`Unsupported CAPTCHA type: ${type}`);
-    const body = { key: apiKey, method, pageurl, json: 1 };
-    if (options.siteKey) body.googlekey = options.siteKey;
-    if (type === "recaptcha_v3") { body.version = "v3"; body.action = options.action || "verify"; body.min_score = options.minScore || 0.3; }
-    if (type === "recaptcha_enterprise") { body.enterprise = 1; body.version = "enterprise"; }
-    // Google search reCAPTCHA requires data-s parameter (see 2captcha.com/blog/google-search-recaptcha)
-    if (options.dataS) body["data-s"] = options.dataS;
-    if (type === "hcaptcha" && options.siteKey) body.sitekey = options.siteKey;
-    if (type === "turnstile" && options.siteKey) body.sitekey = options.siteKey;
-    if (type === "funcaptcha" && options.siteKey) body.publickey = options.siteKey;
-    submitBody = body;
-  } else {
-    // anticaptcha / capmonster use createTask/getTaskResult JSON-RPC style
-    const taskTypeMap = {
-      recaptcha_v2: "NoCaptchaTaskProxyless",
-      recaptcha_v3: "RecaptchaV3TaskProxyless",
-      recaptcha_enterprise: "RecaptchaV3TaskProxyless",
-      hcaptcha: "HCaptchaTaskProxyless",
-      turnstile: "TurnstileTaskProxyless",
-      funcaptcha: "FunCaptchaTaskProxyless",
-    };
-    taskType = taskTypeMap[type];
-    if (!taskType) throw new Error(`Unsupported CAPTCHA type: ${type}`);
-    const task = { type: taskType, websiteURL: pageurl };
-    if (options.siteKey) {
-      if (type === "recaptcha_v2" || type === "recaptcha_v3") task.websiteKey = options.siteKey;
-      else task.websiteKey = options.siteKey;
-    }
-    if (type === "recaptcha_v3") { task.pageAction = options.action || "verify"; task.minScore = options.minScore || 0.3; }
-    if (type === "recaptcha_enterprise") { task.isEnterprise = true; if (options.dataS) task.dataS = options.dataS; }
-    submitBody = { clientKey: apiKey, task };
-  }
-
-  // Submit — 2captcha's in.php endpoint is more reliable with form-encoded data.
-  // JSON POST to in.php can inconsistently drop fields (ERROR_KEY_DOES_NOT_EXIST).
-  // anticaptcha/capmonster use JSON-RPC, so keep JSON for those.
-  let submitRes;
-  if (provider === "2captcha") {
-    const formBody = new URLSearchParams();
-    for (const [k, v] of Object.entries(submitBody)) formBody.append(k, String(v));
-    submitRes = await fetch(ep.submit, {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formBody.toString(),
-    });
-  } else {
-    submitRes = await fetch(ep.submit, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(submitBody),
-    });
-  }
-  const submitData = await submitRes.json();
-
-  if (provider === "2captcha") {
-    if (submitData.status !== 1) throw new Error(submitData.request || "CAPTCHA submit failed");
-    captchaId = submitData.request;
-  } else {
-    if (submitData.errorId) throw new Error(submitData.errorDescription || "CAPTCHA submit failed");
-    captchaId = submitData.taskId;
-  }
-
-  // Poll
-  const deadline = Date.now() + maxWait;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollInterval));
-    let resData;
-    if (provider === "2captcha") {
-      const resRes = await fetch(`${ep.poll}?key=${apiKey}&action=get&id=${captchaId}&json=1`);
-      resData = await resRes.json();
-      if (resData.status === 1) {
-        const token = resData.request;
-        if (type === "recaptcha_v2") {
-          await page.evaluate((t) => {
-            // Set the hidden textarea value (reCAPTCHA reads .value, not innerHTML)
-            const el = document.getElementById("g-recaptcha-response") || document.querySelector("textarea[name='g-recaptcha-response']");
-            if (el) { el.innerHTML = t; el.value = t; }
-            // Trigger the reCAPTCHA callback so the widget marks itself as solved
-            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
-              for (const cid of Object.keys(window.___grecaptcha_cfg.clients)) {
-                const client = window.___grecaptcha_cfg.clients[cid];
-                // Walk the client object to find the callback function
-                for (const prop of Object.keys(client)) {
-                  const val = client[prop];
-                  if (val && typeof val === "object") {
-                    for (const p2 of Object.keys(val)) {
-                      if (typeof val[p2] === "function" && p2.startsWith("callback")) {
-                        try { val[p2](t); } catch (_) {}
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }, token);
-        }
-        return { solved: true, token, provider, type };
-      }
-      if (resData.request !== "CAPCHA_NOT_READY") throw new Error(resData.request);
-    } else {
-      const resRes = await fetch(ep.poll, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientKey: apiKey, taskId: captchaId }),
-      });
-      resData = await resRes.json();
-      if (resData.errorId) throw new Error(resData.errorDescription || "CAPTCHA poll failed");
-      if (resData.status === "ready") {
-        const token = resData.solution?.gRecaptchaResponse || resData.solution?.token || resData.solution?.text || "";
-        return { solved: true, token, provider, type };
-      }
-    }
-  }
-  throw new Error("CAPTCHA solving timed out");
-}
-
-// Auto-detect and solve captchas on the current page.
-// Called after navigation when session.captchaSolver is configured.
-// Detects reCAPTCHA v2, hCaptcha, and Cloudflare Turnstile.
-// Providers: "self" (browser-based, no API key needed), "2captcha", "anticaptcha", "capmonster".
-// ═══════════════════════════════════════════════════════════
-// Google /sorry/ page captcha solver
-// Per 2captcha's blog (https://2captcha.com/blog/google-search-recaptcha):
-// "If you load the captcha on the webpage and then send us this captcha
-// for solving, a token we provide with a solution then will NOT work."
-// Solution: block reCAPTCHA scripts, extract data-s from raw HTML,
-// get token from 2captcha, then submit form directly with the token.
-// ═══════════════════════════════════════════════════════════
-async function solveGoogleSorryCaptcha(page, solverConfig) {
-  const url = page.url();
-  if (!url.includes("/sorry/")) return null;
-
-  const provider = solverConfig.provider || "2captcha";
-  if (provider === "self" || !solverConfig.apiKey) return null;
-
-  // 1. Extract data-s and data-sitekey from the page
-  const captchaInfo = await page.evaluate(() => {
-    const recaptchaDiv = document.querySelector(".g-recaptcha[data-sitekey]");
-    if (!recaptchaDiv) return null;
-    return {
-      siteKey: recaptchaDiv.getAttribute("data-sitekey"),
-      dataS: recaptchaDiv.getAttribute("data-s"),
-    };
-  }).catch(() => null);
-
-  if (!captchaInfo || !captchaInfo.siteKey) return null;
-
-  // 2. Submit to 2captcha with data-s parameter
-  const pageurl = page.url();
-  const submitBody = new URLSearchParams({
-    key: solverConfig.apiKey,
-    method: "userrecaptcha",
-    pageurl: pageurl,
-    googlekey: captchaInfo.siteKey,
-    enterprise: "1",
-    version: "enterprise",
-    json: "1",
-  });
-  if (captchaInfo.dataS) submitBody.append("data-s", captchaInfo.dataS);
-
-  console.log("[google-sorry] Submitting to 2captcha with data-s:", captchaInfo.dataS ? "yes" : "no");
-
-  const submitRes = await fetch("https://2captcha.com/in.php", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: submitBody.toString(),
-  });
-  const submitData = await submitRes.json();
-
-  if (submitData.status !== 1) {
-    console.log("[google-sorry] 2captcha submit failed:", submitData.request);
-    return { detected: true, solved: false, error: submitData.request, type: "recaptcha_enterprise" };
-  }
-
-  const captchaId = submitData.request;
-  console.log("[google-sorry] 2captcha task created:", captchaId);
-
-  // 3. Poll for solution
-  const deadline = Date.now() + 150000;
-  let token = null;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 5000));
-    const resRes = await fetch(`https://2captcha.com/res.php?key=${solverConfig.apiKey}&action=get&id=${captchaId}&json=1`);
-    const resData = await resRes.json();
-    if (resData.status === 1) {
-      token = resData.request;
-      break;
-    }
-    if (resData.request !== "CAPCHA_NOT_READY") {
-      console.log("[google-sorry] 2captcha error:", resData.request);
-      return { detected: true, solved: false, error: resData.request, type: "recaptcha_enterprise" };
-    }
-  }
-
-  if (!token) {
-    return { detected: true, solved: false, error: "timeout", type: "recaptcha_enterprise" };
-  }
-
-  console.log("[google-sorry] Token received, submitting form directly");
-
-  // 4. Create hidden input with token and submit form directly
-  // This bypasses the reCAPTCHA widget entirely
-  await page.evaluate((t) => {
-    const form = document.getElementById("captcha-form") || document.querySelector("form[action='index']");
-    if (form) {
-      // Create hidden input for g-recaptcha-response
-      let input = form.querySelector('input[name="g-recaptcha-response"]');
-      if (!input) {
-        input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "g-recaptcha-response";
-        form.appendChild(input);
-      }
-      input.value = t;
-      // Submit the form
-      form.submit();
-    }
-  }, token).catch(() => {});
-
-  // 5. Wait for navigation away from /sorry/
-  try {
-    await page.waitForURL((url) => !url.toString().includes("/sorry/"), { timeout: 15000 });
-    console.log("[google-sorry] Navigated to:", page.url().slice(0, 80));
-  } catch (_e) {
-    console.log("[google-sorry] Form submission may have failed — still on /sorry/");
-  }
-
-  return {
-    detected: true,
-    solved: true,
-    type: "recaptcha_enterprise",
-    token: token,
-    provider: "2captcha",
-    dataS: captchaInfo.dataS ? true : false,
-  };
-}
-
-async function autoSolveCaptcha(page, solverConfig) {
-  if (!solverConfig) return { detected: false, solved: false, reason: "no_solver_config" };
-  // Self-solver doesn't need an API key — only external providers do
-  const provider = solverConfig.provider || "2captcha";
-  // Auto-fill API key from environment if not provided in config
-  if (provider !== "self" && !solverConfig.apiKey) {
-    const envKey = process.env.CAPTCHA_SERVICE_TOKEN || process.env.CAPTCHA_API_KEY;
-    if (envKey && envKey.length > 20) solverConfig.apiKey = envKey;
-  }
-  if (provider !== "self" && !solverConfig.apiKey) return { detected: false, solved: false, reason: "no_api_key" };
-
-  // Wait for reCAPTCHA/hCaptcha/Turnstile iframes to render.
-  // On Google's /sorry/ page and demo pages, the iframe loads asynchronously
-  // after domcontentloaded — without this wait, detection runs before the
-  // captcha widget exists in the DOM and finds nothing.
-  const captchaSelectors = [
-    'iframe[src*="recaptcha/api2/anchor"]',
-    'iframe[src*="recaptcha/enterprise/anchor"]',
-    'iframe[src*="recaptcha/"]',
-    '.g-recaptcha[data-sitekey]',
-    '#recaptcha.g-recaptcha',
-    'iframe[src*="hcaptcha.com"]',
-    '.h-captcha[data-sitekey]',
-    'iframe[src*="challenges.cloudflare.com"]',
-    '.cf-turnstile[data-sitekey]',
-  ];
-  try {
-    await page.waitForSelector(captchaSelectors.join(", "), { timeout: 8000, state: "attached" });
-  } catch (_e) {
-    // No captcha iframe appeared within 8s — nothing to solve
-    return { detected: false, solved: false };
-  }
-
-  const detections = await page.evaluate(() => {
-    const found = [];
-
-    // reCAPTCHA — look for the g-recaptcha div with sitekey
-    const recaptchaDiv = document.querySelector(".g-recaptcha[data-sitekey]");
-    if (recaptchaDiv) {
-      const isEnterprise = !!document.querySelector('script[src*="recaptcha/enterprise.js"]') || 
-        !!document.querySelector('iframe[src*="recaptcha/enterprise"]');
-      found.push({
-        type: isEnterprise ? "recaptcha_enterprise" : "recaptcha_v2",
-        siteKey: recaptchaDiv.getAttribute("data-sitekey"),
-        dataS: recaptchaDiv.getAttribute("data-s") || null,
-      });
-    }
-
-    // reCAPTCHA — look for iframes (both standard api2 and enterprise)
-    const recaptchaIframe = document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="recaptcha/"]');
-    if (recaptchaIframe && found.length === 0) {
-      const src = recaptchaIframe.getAttribute("src") || "";
-      const match = src.match(/[?&]k=([^&]+)/);
-      if (match) {
-        const isEnterprise = src.includes("recaptcha/enterprise");
-        found.push({ type: isEnterprise ? "recaptcha_enterprise" : "recaptcha_v2", siteKey: match[1] });
-      }
-    }
-
-    // hCaptcha
-    const hcaptchaDiv = document.querySelector(".h-captcha[data-sitekey]");
-    if (hcaptchaDiv) {
-      found.push({ type: "hcaptcha", siteKey: hcaptchaDiv.getAttribute("data-sitekey") });
-    }
-    const hcaptchaIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
-    if (hcaptchaIframe && found.length === 0) {
-      const src = hcaptchaIframe.getAttribute("src") || "";
-      const match = src.match(/[?&]sitekey=([^&]+)/);
-      if (match) found.push({ type: "hcaptcha", siteKey: match[1] });
-    }
-
-    // Cloudflare Turnstile
-    const turnstileDiv = document.querySelector(".cf-turnstile[data-sitekey]");
-    if (turnstileDiv) {
-      found.push({ type: "turnstile", siteKey: turnstileDiv.getAttribute("data-sitekey") });
-    }
-
-    return found;
-  }).catch(() => []);
-
-  // Google /sorry/ page: extract the original search URL from the continue parameter
-  // 2captcha needs the original page URL, not the /sorry/ redirect URL
-  // Also: 2captcha requires the data-s parameter for Google search reCAPTCHA
-  if (detections.length > 0 && page.url().includes("/sorry/")) {
-    const currentUrl = page.url();
-    try {
-      const urlObj = new URL(currentUrl);
-      const continueUrl = urlObj.searchParams.get("continue");
-      if (continueUrl) {
-        detections[0].originalUrl = decodeURIComponent(continueUrl);
-      }
-    } catch (_e) {}
-    // If data-s wasn't found on the div, try extracting it from the full page HTML
-    if (!detections[0].dataS) {
-      try {
-        const dataS = await page.evaluate(() => {
-          const el = document.querySelector("[data-s]");
-          return el ? el.getAttribute("data-s") : null;
-        });
-        if (dataS) detections[0].dataS = dataS;
-      } catch (_e) {}
-    }
-  }
-
-  if (detections.length === 0) return { detected: false, solved: false };
-
-  // Solve the first detected captcha
-  const captcha = detections[0];
-  try {
-    const solveOptions = {
-      ...solverConfig,
-      type: captcha.type,
-      siteKey: captcha.siteKey,
-      originalUrl: captcha.originalUrl,
-      dataS: captcha.dataS,
-    };
-    // Route to self-solver or external API based on provider
-    const result = provider === "self"
-      ? await solveCaptchaSelf(page, solveOptions)
-      : await solveCaptcha(page, solveOptions);
-
-    // For reCAPTCHA v2 and Enterprise, try to submit the form after solving
-    if ((captcha.type === "recaptcha_v2" || captcha.type === "recaptcha_enterprise") && result.solved) {
-      // First, inject the token into the reCAPTCHA response field
-      if (result.token) {
-        await page.evaluate((token) => {
-          const el = document.getElementById("g-recaptcha-response") || document.querySelector("textarea[name='g-recaptcha-response']");
-          if (el) { el.innerHTML = token; el.value = token; }
-          if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
-            for (const cid of Object.keys(window.___grecaptcha_cfg.clients)) {
-              const client = window.___grecaptcha_cfg.clients[cid];
-              for (const prop of Object.keys(client)) {
-                const val = client[prop];
-                if (val && typeof val === "object") {
-                  for (const p2 of Object.keys(val)) {
-                    if (typeof val[p2] === "function" && (p2.startsWith("callback") || p2 === "resolve")) {
-                      try { val[p2](token); } catch (_) {}
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }, result.token).catch(() => {});
-      }
-
-      // Then submit the form
-      await page.evaluate(() => {
-        // Try Google's submitCallback (used on /sorry/ page)
-        if (typeof submitCallback === "function") {
-          try { submitCallback(); } catch (_) {}
-        }
-        // Try submitting the captcha form directly
-        const form = document.getElementById("captcha-form") || document.querySelector("form[action='index']");
-        if (form) { form.submit(); return; }
-        // Fallback: click submit button
-        const btn = document.querySelector('input[type="submit"]') || document.querySelector('button[type="submit"]');
-        if (btn) btn.click();
-      }).catch(() => {});
-
-      // Wait for navigation away from /sorry/ to actual search results
-      try {
-        await page.waitForURL((url) => !url.toString().includes("/sorry/"), { timeout: 15000 });
-      } catch (_e) {
-        await page.waitForTimeout(3000);
-      }
-    }
-
-    return { detected: true, solved: result.solved, type: captcha.type, token: result.token, error: result.error, provider: result.provider, audioDebug: result.audioDebug };
-  } catch (e) {
-    return { detected: true, solved: false, type: captcha.type, error: e.message };
-  }
+// Interactive verification challenges require manual authorization.
+// No automatic CAPTCHA solvers or third-party token services are enabled.
+async function autoSolveCaptcha() {
+  return { detected: false, solved: false, manual_required: true, reason: "manual_verification_required" };
 }
 
 // Bounded crawler
@@ -861,7 +398,7 @@ api.get("/liveness", (req, res) => res.json({ ok: true, worker_id: WORKER_ID }))
 
 api.get("/readiness", async (req, res) => {
   try {
-    const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    const browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: ["--disable-dev-shm-usage"] });
     await browser.close();
     res.json({ ok: true, browser_launch: "verified", worker_id: WORKER_ID });
   } catch (e) {
@@ -889,8 +426,8 @@ api.get("/config", (req, res) => {
     maxSessions: MAX_SESSIONS, activeSessions: sessions.size, poolSize: pool.length, poolCapacity: POOL_SIZE,
     workerId: WORKER_ID, region: REGION, engineVersion: ENGINE_VERSION, schemaVersion: SCHEMA_VERSION,
     features: {
-      videoRecording: true, cdpDebugging: true, sessionPooling: true, sessionResume: true,
-      extensions: true, captchaSolving: true, networkMocking: true, sessionSharing: true,
+      videoRecording: true, cdpDebugging: false, sessionPooling: true, sessionResume: true,
+      extensions: false, captchaSolving: false, networkMocking: true, sessionSharing: true,
       boundedCrawl: true, pagination: true, evaluate: true, frameSwitch: true, cookieImportExport: true,
     },
   });
@@ -901,8 +438,19 @@ api.get("/config", (req, res) => {
 // ═══════════════════════════════════════════════
 
 api.post("/sessions", async (req, res) => {
+  let browser, context, page;
   try {
     const opts = req.body || {};
+    // These options can bypass network controls or access the host filesystem.
+    if (opts.proxy || opts.proxyPool?.length || opts.extensions?.length || opts.enableCDP || opts.userDataDir) {
+      return res.status(400).json({ error: "Unsupported unsafe session configuration" });
+    }
+
+    // Reject unsafe initial targets before allocating a browser context.
+    if (opts.target_url) {
+      const initial = validateTargetUrl(opts.target_url);
+      if (!initial.ok) return res.status(400).json({ error: initial.error });
+    }
 
     // Use pool if available
     if (opts.usePool && pool.length > 0) {
@@ -912,7 +460,6 @@ api.post("/sessions", async (req, res) => {
         await sessionManager.setStatus(pooledId, "active");
         // Merge per-session opts that pooled sessions don't have yet
         // (captcha solver config, proxy, headers, etc.)
-        s.captchaSolver = opts.captchaSolver || null;
         warmPool();
         return res.json({
           sessionId: s.id, status: "idle", fromPool: true,
@@ -925,7 +472,7 @@ api.post("/sessions", async (req, res) => {
 
     if (sessions.size >= MAX_SESSIONS) return res.status(503).json({ error: "Max concurrent sessions reached" });
 
-    const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+    const launchArgs = ["--disable-dev-shm-usage"];
     if (opts.blockedResources?.includes("images")) launchArgs.push("--blink-settings=imagesEnabled=false");
 
     // Extensions
@@ -945,6 +492,7 @@ api.post("/sessions", async (req, res) => {
     }
 
     const contextOptions = {
+      serviceWorkers: "block",
       viewport: opts.viewport || { width: 1280, height: 720 },
       userAgent: opts.userAgent, locale: opts.locale, timezoneId: opts.timezone,
       geolocation: opts.geolocation, extraHTTPHeaders: opts.headers,
@@ -952,7 +500,6 @@ api.post("/sessions", async (req, res) => {
     if (opts.proxy) contextOptions.proxy = { server: opts.proxy.server, username: opts.proxy.username, password: opts.proxy.password };
     if (opts.recordVideo) contextOptions.recordVideo = { dir: VIDEO_DIR };
 
-    let browser, context, page;
     // Proxy rotation — pick from proxyPool (round-robin) if provided (Browserbase parity)
     let effectiveProxy = opts.proxy;
     if (!effectiveProxy && opts.proxyPool?.length > 0) {
@@ -962,7 +509,7 @@ api.post("/sessions", async (req, res) => {
     if (effectiveProxy) contextOptions.proxy = { server: effectiveProxy.server, username: effectiveProxy.username, password: effectiveProxy.password };
 
     if (opts.userDataDir) {
-      context = await chromium.launchPersistentContext(opts.userDataDir, { headless: true, args: launchArgs, ...contextOptions });
+      context = await chromium.launchPersistentContext(opts.userDataDir, { headless: true, args: launchArgs, ...contextOptions, chromiumSandbox: true });
       page = context.pages()[0] || await context.newPage();
       await context.addInitScript(buildStealthScript(opts.userDataDir));
       // TASK 8: Full fingerprint randomization
@@ -971,7 +518,7 @@ api.post("/sessions", async (req, res) => {
         await context.addInitScript(getFingerprintInitScript(fp));
       }
     } else {
-      browser = await chromium.launch({ headless: true, args: launchArgs });
+      browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: launchArgs });
       context = await browser.newContext(contextOptions);
       await context.addInitScript(buildStealthScript(Math.random().toString(36).slice(2)));
       // TASK 8: Full fingerprint randomization
@@ -1001,16 +548,6 @@ api.post("/sessions", async (req, res) => {
       }, { storageByOrigin });
     }
 
-    // A resumed context is not useful until it is on the saved target.
-    // Navigation happens only after cookies + origin storage restoration hooks
-    // are installed, so authenticated state is available during page startup.
-    if (opts.target_url) {
-      await page.goto(opts.target_url, {
-        waitUntil: opts.waitUntil || "domcontentloaded",
-        timeout: opts.timeout || 60000,
-      });
-    }
-
     // Network mocking
     if (opts.networkMocks?.length > 0) {
       for (const mock of opts.networkMocks) {
@@ -1022,7 +559,20 @@ api.post("/sessions", async (req, res) => {
     if (opts.blockedResources?.length > 0) {
       context.route("**/*", (route) => {
         const type = route.request().resourceType();
-        return opts.blockedResources.includes(type) ? route.abort() : route.continue();
+        return opts.blockedResources.includes(type) ? route.abort() : route.fallback();
+      });
+    }
+
+    // Last registered context route executes first in Playwright.
+    await installOutboundGuard(context, { enforceHttps: ENFORCE_HTTPS });
+
+    // Initial navigation and all subsequent redirect/resource requests are checked.
+    if (opts.target_url) {
+      const validation = validateTargetUrl(opts.target_url);
+      if (!validation.ok) return res.status(400).json({ error: validation.error });
+      await page.goto(opts.target_url, {
+        waitUntil: opts.waitUntil || "domcontentloaded",
+        timeout: opts.timeout || 60000,
       });
     }
 
@@ -1031,8 +581,6 @@ api.post("/sessions", async (req, res) => {
       id, browser, context, page, status: "idle", url: "", title: "",
       lastActivity: Date.now(), createdAt: Date.now(), consoleLogs: [], networkLogs: [],
       recordVideo: !!opts.recordVideo, cdpUrl, userDataDir: opts.userDataDir,
-      // Captcha auto-solver config (injected by gateway when captcha_solver: true)
-      captchaSolver: opts.captchaSolver || null,
       // TASK 8: Human behavior level for clicks/typing
       behaviorLevel: opts.behaviorLevel || 'low',
       antiBotSystem: opts.antiBotSystem || null,
@@ -1051,7 +599,22 @@ api.post("/sessions", async (req, res) => {
       createdAt: new Date(session.createdAt).toISOString(),
       expiresAt: new Date(session.createdAt + SESSION_TTL_MS).toISOString(),
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    // Classify failures without leaking request URLs, browser stderr or secrets.
+    const message = String(err?.message || "");
+    const reason = /No usable sandbox|Failed to move to new namespace|Operation not permitted|zygote host|Failed to unshare|seccomp/i.test(message)
+      ? "CHROMIUM_SANDBOX_UNAVAILABLE"
+      : /Executable doesn't exist|Failed to launch|browserType.launch/i.test(message)
+        ? "CHROMIUM_LAUNCH_FAILURE"
+        : /ENOSPC|ENOMEM|Too many open files/i.test(message)
+          ? "RUNTIME_RESOURCE_EXHAUSTED"
+          : "SESSION_CREATION_ERROR";
+    console.error("ENGINE_SESSION_START_FAILED:" + reason);
+    // A failed browser launch/navigation must not leak a process or context.
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    res.status(500).json({ error: "Session creation failed" });
+  }
 });
 
 // ═══════════════════════════════════════════════
@@ -1098,78 +661,9 @@ api.post("/sessions/:id/execute", async (req, res) => {
 
     switch (action_type) {
       case "goto": {
-        // Block reCAPTCHA scripts when captcha solver is configured.
-        // We intercept the HTML response and strip reCAPTCHA script tags from it,
-        // preventing the reCAPTCHA JS from consuming the data-s variable on Google's
-        // /sorry/ page. This keeps data-s fresh for 2captcha to solve.
-        if (s.captchaSolver) {
-          await page.route("**/*", async (route) => {
-            const reqUrl = route.request().url();
-            // Abort reCAPTCHA script/iframe requests directly
-            if (reqUrl.includes("recaptcha/enterprise.js") ||
-                reqUrl.includes("gstatic.com/recaptcha/") ||
-                reqUrl.includes("recaptcha/api.js") ||
-                reqUrl.includes("recaptcha/api2/") ||
-                reqUrl.includes("recaptcha/enterprise/")) {
-              return route.abort();
-            }
-            // For HTML document responses, strip reCAPTCHA script tags
-            if (route.request().resourceType() === "document") {
-              try {
-                const response = await route.fetch();
-                const body = await response.text();
-                // Only modify if the page contains reCAPTCHA
-                if (body.includes("recaptcha")) {
-                  const stripped = body
-                    .replace(/<script[^>]*recaptcha[^>]*><\/script>/gi, "")
-                    .replace(/<script[^>]*src=["'][^"']*gstatic\.com\/recaptcha[^"']*["'][^>]*><\/script>/gi, "");
-                  return route.fulfill({
-                    status: response.status(),
-                    headers: { ...response.headers(), "content-length": String(stripped.length) },
-                    body: stripped,
-                  });
-                }
-                // Page doesn't have reCAPTCHA — fulfill with original response
-                return route.fulfill({
-                  status: response.status(),
-                  headers: response.headers(),
-                  body: body,
-                });
-              } catch (_e) {
-                return route.continue();
-              }
-            }
-            return route.continue();
-          });
-        }
         await page.goto(value || selector, { waitUntil: options.waitUntil || "domcontentloaded", timeout: options.timeout || DEFAULT_TIMEOUT });
         s.url = page.url(); s.title = await page.title();
         result.url = s.url; result.title = s.title;
-        // Auto-solve captcha if session has captcha solver configured
-        if (s.captchaSolver) {
-          // Google /sorry/ page needs special handling (data-s parameter, form submission)
-          const sorryResult = await solveGoogleSorryCaptcha(page, s.captchaSolver);
-          if (sorryResult) {
-            result.captcha = sorryResult;
-            if (sorryResult.solved) {
-              s.url = page.url(); s.title = await page.title().catch(() => s.title);
-              result.url = s.url; result.title = s.title;
-            }
-            break;
-          }
-          // Standard captcha solving for non-Google pages
-          const captchaResult = await autoSolveCaptcha(page, s.captchaSolver);
-          // Always include captcha result in response — even when not detected,
-          // so the caller knows auto-solve was attempted
-          result.captcha = captchaResult;
-          if (captchaResult.detected) {
-            s.url = page.url(); s.title = await page.title().catch(() => s.title);
-            result.url = s.url; result.title = s.title;
-          }
-        } else {
-          // No captcha solver configured — note it in the response
-          result.captcha = { detected: false, solved: false, reason: "no_captcha_solver_configured" };
-        }
         break;
       }
       case "back": { await page.goBack({ timeout: options.timeout || DEFAULT_TIMEOUT }); s.url = page.url(); result.url = s.url; break; }
@@ -1226,8 +720,8 @@ api.post("/sessions/:id/execute", async (req, res) => {
         }
         break;
       }
-      case "extract_text": { result.data = await (await locate(page, selector)).innerText(); break; }
-      case "extract_html": { result.data = await (await locate(page, selector)).innerHTML(); break; }
+      case "extract_text": { result.data = await extractText(page, selector, locate); break; }
+      case "extract_html": { result.data = await extractHtml(page, selector, locate); break; }
       case "extract_attribute": { result.data = await (await locate(page, selector)).getAttribute(options.attribute || "href"); break; }
       case "extract_table": { result.data = await page.evaluate((sel) => { const t = document.querySelector(sel); if (!t) return []; return [...t.querySelectorAll("tr")].map((r) => [...r.querySelectorAll("th,td")].map((c) => c.innerText.trim())); }, selector); break; }
       case "extract_json": { result.data = await page.evaluate(options.evaluateFn || `(selector) => document.querySelector(selector)?.innerText`, selector); try { result.data = JSON.parse(result.data); } catch (e) {} break; }
@@ -1251,16 +745,7 @@ api.post("/sessions/:id/execute", async (req, res) => {
       case "set_local_storage": { await page.evaluate(([k, v]) => localStorage.setItem(k, v), [options.key, options.value]); break; }
       case "capture_response": { result.data = await page.evaluate(() => performance.getEntriesByType("navigation")[0]?.responseStatus || 200); break; }
       case "solve_captcha": {
-        const captchaProvider = options.provider || "2captcha";
-        // Auto-fill API key from environment if not provided
-        if (captchaProvider !== "self" && !options.apiKey) {
-          const envKey = process.env.CAPTCHA_SERVICE_TOKEN || process.env.CAPTCHA_API_KEY;
-          if (envKey && envKey.length > 20) options.apiKey = envKey;
-        }
-        result.data = captchaProvider === "self"
-          ? await solveCaptchaSelf(page, options)
-          : await solveCaptcha(page, options);
-        // Also expose in captcha field for consistency with auto-solve
+        result.data = { solved: false, manual_required: true, reason: "manual_verification_required" };
         result.captcha = result.data;
         break;
       }

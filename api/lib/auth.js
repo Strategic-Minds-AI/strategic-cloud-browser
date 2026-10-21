@@ -44,11 +44,14 @@ export async function authenticate(req) {
   const pepper = process.env.API_KEY_PEPPER;
   if (!pepper) throw new UnauthorizedError("API_KEY_PEPPER is not configured");
 
+  // Tenant is unknown until this trusted, narrowly scoped authentication
+  // lookup completes. A direct SELECT on the RLS-protected api_keys table
+  // would fail closed for the API role (no app.tenant_id set yet).
+  // Migration 002 provides a private SECURITY DEFINER function whose EXECUTE
+  // privilege belongs only to cloudbrowser_api.
   const { rows } = await getPool().query(
     `SELECT id, tenant_id, key_hash, scopes, expires_at, revoked_at
-       FROM api_keys
-      WHERE prefix = $1 AND environment = $2
-      LIMIT 1`,
+       FROM cloudbrowser_private.lookup_api_key($1, $2)`,
     [parsed.prefix, parsed.environment],
   );
 

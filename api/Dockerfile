@@ -1,19 +1,19 @@
 FROM node:24-alpine
 
-WORKDIR /srv
+# Railway must use the repository root as its Docker build context.
+# The API imports ../shared/db.js; copying api/ alone silently breaks runtime imports.
+WORKDIR /app
 
-# Dependencies first for layer caching. No lockfile is committed yet, so the
-# image installs from the range-pinned manifest (see docs/portable/DEPLOYMENT.md
-# for the lockfile follow-up).
-COPY package*.json ./
+COPY api/package.json api/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY . .
+# The API and shared code must be siblings so ../../shared/db.js resolves.
+COPY api/ ./api/
+COPY shared/ ./shared/
 
 ENV NODE_ENV=production
 ENV API_PORT=4000
 EXPOSE 4000
 
 USER node
-
-CMD ["node", "server.js"]
+CMD ["node", "api/server.js"]
