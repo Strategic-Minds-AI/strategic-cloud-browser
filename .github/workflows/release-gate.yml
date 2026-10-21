@@ -204,7 +204,10 @@ jobs:
             "INSERT INTO tenants (id,slug,display_name) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','CI Tenant A'),('00000000-0000-4000-8000-0000000000b2','ci-b','CI Tenant B');"
           docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 -c \
             "INSERT INTO api_keys(tenant_id,label,environment,prefix,key_hash,scopes) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','cb_test','qaabcdef','$HASH_A',ARRAY['sessions:read','sessions:write']),('00000000-0000-4000-8000-0000000000b2','ci-b','cb_test','qaabcde1','$HASH_B',ARRAY['sessions:read','sessions:write']);"
+          # Playwright's official Docker seccomp profile allows user-namespace creation.
+          # Do not use --privileged or disable the Chromium sandbox.
           docker run -d --name cb-ci-engine --network cloudbrowser-ci-net \
+            --security-opt seccomp=browser-engine/seccomp_profile.json \
             -e ENGINE_API_KEY=ci-only-engine-key-0123456789abcdef \
             -e POOL_SIZE=0 -e MAX_SESSIONS=2 -e ENFORCE_HTTPS=true \
             cloudbrowser-engine:smoke
