@@ -15,11 +15,8 @@ RUN npx playwright install chromium
 
 COPY browser-engine/server.js ./
 COPY browser-engine/session-manager.js ./
-COPY browser-engine/captcha-self-solver.js ./
 COPY browser-engine/fingerprint-randomizer.js ./
 COPY browser-engine/human-behavior.js ./
-COPY browser-engine/stt-whisper.js ./
-COPY browser-engine/self-solvers/ ./self-solvers/
 
 ENV NODE_ENV=production
 ENV PORT=8080
