@@ -28,10 +28,45 @@ async function request(path, { key, method = "GET", data } = {}) {
 assert.equal((await request("/health")).status, 200);
 assert.equal((await request("/v1/sessions")).status, 401);
 
-const denied = await request("/v1/sessions", {
-  key: keyA, method: "POST", data: { url: "http://169.254.169.254/latest/meta-data" }
-});
-assert.ok(denied.status >= 400, "private/metadata navigation unexpectedly accepted");
+for (const blockedUrl of [
+  "https://169.254.169.254/latest/meta-data",
+  "https://127.0.0.1/",
+  "https://[::ffff:127.0.0.1]/",
+  "https://192.168.1.1/"
+]) {
+  const denied = await request("/v1/sessions", {
+    key: keyA, method: "POST", data: { url: blockedUrl }
+  });
+  assert.ok(denied.status >= 400, "private/metadata navigation unexpectedly accepted: " + blockedUrl);
+}
+
+// Real disposable PostgreSQL tenant isolation and queue idempotency.
+const jobInput = {
+  type: "engine.health",
+  payload: { synthetic: true },
+  idempotency_key: "cloudbrowser-ci-isolation-job-01"
+};
+const queuedA = await request("/v1/jobs", { key: keyA, method: "POST", data: jobInput });
+assert.equal(queuedA.status, 202, "tenant A job enqueue: " + JSON.stringify(queuedA.body));
+const jobIdA = queuedA.body.job?.id;
+assert.ok(jobIdA, "tenant A job ID missing");
+assert.equal(queuedA.body.job.status, "queued");
+const duplicateA = await request("/v1/jobs", { key: keyA, method: "POST", data: jobInput });
+assert.equal(duplicateA.status, 202, "same-tenant idempotent replay rejected");
+assert.equal(duplicateA.body.job?.id, jobIdA, "same tenant created duplicate job");
+const deniedOtherTenant = await request("/v1/jobs/" + encodeURIComponent(jobIdA), { key: keyB });
+assert.equal(deniedOtherTenant.status, 404, "tenant B can read tenant A job");
+const queuedB = await request("/v1/jobs", { key: keyB, method: "POST", data: jobInput });
+assert.equal(queuedB.status, 202, "tenant B job enqueue failed");
+assert.notEqual(queuedB.body.job?.id, jobIdA, "cross-tenant idempotency collision");
+for (const [key, id] of [[keyA, jobIdA], [keyB, queuedB.body.job.id]]) {
+  const canceled = await request("/v1/jobs/" + encodeURIComponent(id) + "/cancel", {
+    key, method: "POST"
+  });
+  assert.equal(canceled.status, 200, "cancel own pending job");
+  assert.equal(canceled.body.job?.status, "cancelled", "job cancellation not persisted");
+}
+console.log("PASS: disposable PostgreSQL durable job idempotency, cross-tenant denial and cancellation");
 
 let sessionId;
 try {
