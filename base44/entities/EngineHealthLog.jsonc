@@ -1,0 +1,83 @@
+{
+  "name": "EngineHealthLog",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "unhealthy",
+        "unreachable"
+      ]
+    },
+    "response_time_ms": {
+      "type": "number"
+    },
+    "worker_id": {
+      "type": "string",
+      "description": "Railway worker that was probed"
+    },
+    "engine_url": {
+      "type": "string",
+      "description": "Full base URL of the engine instance probed"
+    },
+    "engine_label": {
+      "type": "string",
+      "description": "Human label e.g. engine-1, engine-2, engine-3"
+    },
+    "region": {
+      "type": "string"
+    },
+    "engine_version": {
+      "type": "string"
+    },
+    "active_sessions": {
+      "type": "number"
+    },
+    "max_sessions": {
+      "type": "number"
+    },
+    "pool_size": {
+      "type": "number"
+    },
+    "pool_capacity": {
+      "type": "number"
+    },
+    "uptime_seconds": {
+      "type": "number"
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "checked_by": {
+      "type": "string",
+      "description": "User ID who triggered the health check"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {},
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

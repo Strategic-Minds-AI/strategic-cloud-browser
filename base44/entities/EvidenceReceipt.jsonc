@@ -1,0 +1,148 @@
+{
+  "name": "EvidenceReceipt",
+  "type": "object",
+  "properties": {
+    "receipt_id": {
+      "type": "string",
+      "description": "Stable receipt identifier (e.g. rcpt_<ts>)"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Browser session this evidence belongs to"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "system_id": {
+      "type": "string",
+      "description": "SystemManifest this evidence pertains to (optional)"
+    },
+    "tool": {
+      "type": "string",
+      "description": "MCP tool / action that produced this evidence"
+    },
+    "action": {
+      "type": "string",
+      "description": "Deterministic action executed"
+    },
+    "target": {
+      "type": "string",
+      "description": "URL / selector / resource targeted"
+    },
+    "expected_result": {
+      "type": "string"
+    },
+    "actual_result": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail",
+        "unknown",
+        "blocked"
+      ],
+      "default": "unknown"
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": [
+        "screenshot",
+        "dom",
+        "network",
+        "console",
+        "test",
+        "artifact",
+        "commit",
+        "deployment",
+        "approval",
+        "visual_diff",
+        "extract",
+        "other"
+      ],
+      "default": "other"
+    },
+    "screenshot_url": {
+      "type": "string"
+    },
+    "artifact_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "data": {
+      "type": "object",
+      "description": "Structured evidence payload (DOM result, network response, test output, etc.)"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "approval_state": {
+      "type": "string",
+      "enum": [
+        "not_required",
+        "pending",
+        "granted",
+        "rejected",
+        "auto"
+      ],
+      "default": "not_required"
+    },
+    "approval_id": {
+      "type": "string"
+    },
+    "rollback_reference": {
+      "type": "string"
+    },
+    "operator": {
+      "type": "string",
+      "description": "Operator / agent that issued the action"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "receipt_id",
+    "tool",
+    "status",
+    "evidence_type"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

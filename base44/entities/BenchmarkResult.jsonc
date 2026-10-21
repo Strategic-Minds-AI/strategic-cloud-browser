@@ -1,0 +1,106 @@
+{
+  "name": "BenchmarkResult",
+  "type": "object",
+  "properties": {
+    "system_manifest_id": {
+      "type": "string",
+      "description": "Reference to the SystemManifest this result belongs to"
+    },
+    "dimension": {
+      "type": "string",
+      "enum": [
+        "build",
+        "lint",
+        "type",
+        "security",
+        "data",
+        "browser",
+        "mobile",
+        "e2e",
+        "rls",
+        "visual",
+        "accessibility",
+        "performance",
+        "deployment",
+        "secrets"
+      ],
+      "description": "Validation constitution dimension"
+    },
+    "gate": {
+      "type": "string",
+      "enum": [
+        "HARD",
+        "SOFT"
+      ],
+      "default": "HARD"
+    },
+    "weight": {
+      "type": "number",
+      "default": 0,
+      "description": "Constitution weight % for this dimension"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN",
+        "BLOCKED"
+      ],
+      "default": "UNKNOWN"
+    },
+    "score": {
+      "type": "number",
+      "default": 0
+    },
+    "evidence_artifact": {
+      "type": "string",
+      "description": "Receipt / artifact URL or identifier proving the result"
+    },
+    "failure_fingerprint": {
+      "type": "string",
+      "description": "Stable fingerprint of the failure for dedup/regression tracking"
+    },
+    "root_cause": {
+      "type": "string"
+    },
+    "exact_repair": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Groups results from a single audit run"
+    },
+    "validated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "system_manifest_id",
+    "dimension",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

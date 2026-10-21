@@ -1,0 +1,126 @@
+{
+  "name": "Step",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string"
+    },
+    "order": {
+      "type": "number",
+      "default": 0
+    },
+    "name": {
+      "type": "string"
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "goto",
+        "back",
+        "forward",
+        "reload",
+        "wait_for_selector",
+        "wait_for_load_state",
+        "wait_for_timeout",
+        "click",
+        "hover",
+        "type",
+        "fill",
+        "press",
+        "select_option",
+        "scroll",
+        "drag_and_drop",
+        "upload_file",
+        "download",
+        "handle_dialog",
+        "new_tab",
+        "switch_tab",
+        "close_tab",
+        "frame_switch",
+        "screenshot",
+        "pdf",
+        "extract_text",
+        "extract_html",
+        "extract_attribute",
+        "extract_table",
+        "extract_json",
+        "ai_extract",
+        "evaluate",
+        "set_cookies",
+        "import_cookies",
+        "export_cookies",
+        "set_headers",
+        "set_local_storage",
+        "capture_response",
+        "solve_captcha",
+        "mock_response",
+        "save_state",
+        "restore_state",
+        "crawl",
+        "paginate"
+      ]
+    },
+    "selector": {
+      "type": "string"
+    },
+    "value": {
+      "type": "string"
+    },
+    "options": {
+      "type": "object"
+    },
+    "description": {
+      "type": "string"
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "JSON schema to validate extracted data against"
+    }
+  },
+  "required": [
+    "job_id",
+    "order",
+    "action_type"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

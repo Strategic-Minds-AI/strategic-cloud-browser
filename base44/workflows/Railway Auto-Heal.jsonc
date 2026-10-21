@@ -1,0 +1,45 @@
+{
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "17 * * * *",
+      "one_time_date": null,
+      "timezone": "America/New_York",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "railway_auto_heal",
+      "version": "1.1",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_autocomplete_runtime_fallback": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAutoCompleteGovernedCycle",
+            "args": { "trigger": "railway_runtime_fallback_hourly" }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run governed AutoComplete runtime fallback",
+            "description": "Hourly fallback through the canonical wrapper; production Railway redeploys are not independently triggered by this clock"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Railway Auto-Heal",
+  "description": "Hourly runtime fallback into governed AutoComplete. It audits and queues repair evidence without independently redeploying Railway production services."
+}

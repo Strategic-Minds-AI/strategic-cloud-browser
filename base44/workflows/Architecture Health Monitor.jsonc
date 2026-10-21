@@ -1,0 +1,49 @@
+{
+  "name": "Architecture Health Monitor",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "interval",
+      "cron_expression": null,
+      "one_time_date": null,
+      "timezone": "UTC",
+      "interval_value": 1440,
+      "interval_unit": "minutes",
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Daily deep architecture pass through the governed AutoComplete wrapper. It may request bounded healing, but scoring requires independent fresh evidence and repair-integrity postconditions.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "architecture_health_monitor",
+      "version": "1.1",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_healing_loop": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runAutoCompleteGovernedCycle",
+            "args": {
+              "trigger": "architecture_daily",
+              "force_deep": true,
+              "request_healing": true
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run governed daily AutoComplete architecture pass",
+            "description": "Deep audit, bounded healing request, rescore and mandatory independent-repair integrity enforcement"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,486 @@
+{
+  "name": "HeirSearch",
+  "type": "object",
+  "properties": {
+    "deceased_name": {
+      "type": "string",
+      "description": "Full name of the deceased person"
+    },
+    "deceased_dob": {
+      "type": "string",
+      "description": "Date of birth if known (ISO date)"
+    },
+    "deceased_dod": {
+      "type": "string",
+      "description": "Date of death if known (ISO date)"
+    },
+    "deceased_last_address": {
+      "type": "string",
+      "description": "Last known address of the deceased"
+    },
+    "deceased_ssn": {
+      "type": "string",
+      "description": "SSN if known (last 4 digits)"
+    },
+    "death_location": {
+      "type": "string",
+      "description": "City, county, state where death occurred"
+    },
+    "case_reference": {
+      "type": "string",
+      "description": "Account or case reference for this heir search"
+    },
+    "client_email": {
+      "type": "string",
+      "description": "Client email to assign this case to a client portal user"
+    },
+    "authorization": {
+      "type": "object",
+      "description": "The authority this case is researched under, recorded once at intake and inherited by every search that serves it. Never reconstructed after the fact.",
+      "properties": {
+        "permissible_purpose": {
+          "type": "string",
+          "description": "Enumerated permissible purpose (FCRA \u00a7604). Must be one of the values defined in searchValidation.ts"
+        },
+        "legal_matter": {
+          "type": "string",
+          "description": "The specific legal matter this research serves"
+        },
+        "case_reference": {
+          "type": "string",
+          "description": "Court docket, case or matter reference"
+        },
+        "data_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Regulated data categories this case may touch (credit_header, driver_record, financial, medical)"
+        },
+        "subject_name": {
+          "type": "string"
+        },
+        "asserted_by_id": {
+          "type": "string",
+          "description": "Accountable operator who asserted the purpose"
+        },
+        "asserted_by_email": {
+          "type": "string"
+        },
+        "asserted_at": {
+          "type": "string",
+          "description": "When the purpose was asserted, before any source was contacted"
+        },
+        "verdict": {
+          "type": "object",
+          "description": "Verdict from the strict authorization gate at intake"
+        }
+      }
+    },
+    "certification": {
+      "type": "object",
+      "description": "Structured independent certification. Written only by runHeirSearchQA. Replaces the previous practice of appending certification text to notes.",
+      "properties": {
+        "certified": {
+          "type": "boolean",
+          "default": false
+        },
+        "qa_score": {
+          "type": "number"
+        },
+        "qa_model": {
+          "type": "string",
+          "description": "Which model produced the QA verdict. Recorded so independence is auditable."
+        },
+        "validator_score": {
+          "type": "number"
+        },
+        "validator_model": {
+          "type": "string"
+        },
+        "search_model": {
+          "type": "string"
+        },
+        "model_separation_ok": {
+          "type": "boolean",
+          "description": "True only when producer, QA and Validator are three distinct models"
+        },
+        "overall_score": {
+          "type": "number"
+        },
+        "failed_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Deterministic rules that refused certification, e.g. CERT-05"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verified_finding_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Findings whose source was mechanically re-fetched and whose recorded evidence was still present"
+        },
+        "unverified_finding_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stamp": {
+          "type": "string"
+        },
+        "certifier_version": {
+          "type": "string"
+        },
+        "certified_at": {
+          "type": "string"
+        }
+      }
+    },
+    "blocked_sources": {
+      "type": "object",
+      "description": "Which licensed and public sources were unavailable, and the exact credential missing. A blocked source is disclosed, never silently skipped.",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "available": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "disclosure": {
+          "type": "string"
+        },
+        "checked_at": {
+          "type": "string"
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "searching",
+        "found",
+        "partial",
+        "failed"
+      ],
+      "default": "pending"
+    },
+    "deceased_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the deceased person's identity was confirmed via death records"
+    },
+    "deceased_details": {
+      "type": "object",
+      "description": "Confirmed deceased details from SSDI/obituary/death records",
+      "properties": {
+        "full_name": {
+          "type": "string"
+        },
+        "birth_date": {
+          "type": "string"
+        },
+        "death_date": {
+          "type": "string"
+        },
+        "last_residence": {
+          "type": "string"
+        },
+        "ssn_state_issued": {
+          "type": "string"
+        },
+        "obituary_url": {
+          "type": "string"
+        },
+        "obituary_text": {
+          "type": "string"
+        },
+        "funeral_home": {
+          "type": "string"
+        },
+        "cause_of_death": {
+          "type": "string"
+        },
+        "spouse_name": {
+          "type": "string"
+        },
+        "parents_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "children_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "siblings_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "number"
+        }
+      }
+    },
+    "family_tree": {
+      "type": "object",
+      "description": "Constructed family tree from genealogy research",
+      "properties": {
+        "spouse": {
+          "type": "string"
+        },
+        "ex_spouses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "siblings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grandchildren": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nieces_nephews": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cousins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aunts_uncles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "identified_heirs": {
+      "type": "array",
+      "description": "All identified potential heirs with their contact info",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "relationship": {
+            "type": "string"
+          },
+          "relationship_degree": {
+            "type": "number",
+            "description": "Degree of kinship (1=spouse/child, 2=parent/sibling, etc.)"
+          },
+          "is_living": {
+            "type": "boolean"
+          },
+          "phone_numbers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "number": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "address": {
+            "type": "string"
+          },
+          "age_or_dob": {
+            "type": "string"
+          },
+          "social_profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence this person is a rightful heir (0-100)"
+          },
+          "inheritance_priority": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "distant",
+              "unknown"
+            ],
+            "default": "unknown"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "default": []
+    },
+    "probate_info": {
+      "type": "object",
+      "description": "Probate court information found",
+      "properties": {
+        "court_county": {
+          "type": "string"
+        },
+        "case_number": {
+          "type": "string"
+        },
+        "executor_name": {
+          "type": "string"
+        },
+        "executor_contact": {
+          "type": "string"
+        },
+        "attorney_name": {
+          "type": "string"
+        },
+        "filing_date": {
+          "type": "string"
+        },
+        "estate_value": {
+          "type": "string"
+        },
+        "will_found": {
+          "type": "boolean"
+        },
+        "will_details": {
+          "type": "string"
+        }
+      }
+    },
+    "sources_checked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "All data sources queried"
+    },
+    "methods_used": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "All search methods executed"
+    },
+    "confidence_score": {
+      "type": "number",
+      "default": 0,
+      "description": "Overall confidence in the heir search (0-100). A self-reported figure \u2014 it is NEVER evidence, and it is withheld from the QA agent so the review is not anchored."
+    },
+    "search_duration_ms": {
+      "type": "number",
+      "default": 0
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "deceased_name",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "created_by_id": "{{user.id}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "data.client_email": "{{user.email}}"
+        }
+      ]
+    },
+    "update": {
+      "created_by_id": "{{user.id}}"
+    },
+    "delete": {
+      "created_by_id": "{{user.id}}"
+    }
+  }
+}

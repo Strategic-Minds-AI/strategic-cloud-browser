@@ -1,0 +1,197 @@
+{
+  "name": "SystemSettings",
+  "type": "object",
+  "properties": {
+    "default_viewport_width": {
+      "type": "number",
+      "default": 1920
+    },
+    "default_viewport_height": {
+      "type": "number",
+      "default": 1080
+    },
+    "default_user_agent": {
+      "type": "string",
+      "description": "Custom default user agent string"
+    },
+    "default_locale": {
+      "type": "string",
+      "default": "en-US"
+    },
+    "default_timezone": {
+      "type": "string",
+      "default": "America/New_York"
+    },
+    "default_timeout_ms": {
+      "type": "number",
+      "default": 30000
+    },
+    "default_blocked_resources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Resource types to block by default (image, font, media, stylesheet)"
+    },
+    "default_headers": {
+      "type": "object",
+      "description": "Default HTTP headers for all sessions"
+    },
+    "default_geolocation": {
+      "type": "object",
+      "description": "Default geolocation {latitude, longitude, accuracy}"
+    },
+    "max_concurrent_sessions": {
+      "type": "number",
+      "default": 10,
+      "description": "Maximum concurrent browser sessions"
+    },
+    "rate_limit_per_minute": {
+      "type": "number",
+      "default": 60,
+      "description": "Max API requests per minute"
+    },
+    "pool_size": {
+      "type": "number",
+      "default": 3,
+      "description": "Maximum pooled sessions"
+    },
+    "pool_warm_count": {
+      "type": "number",
+      "default": 2,
+      "description": "Number of pre-warmed sessions to maintain"
+    },
+    "autoscaling_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable auto-scaling based on queue depth and CPU"
+    },
+    "autoscale_min_pool": {
+      "type": "number",
+      "default": 2,
+      "description": "Minimum pool size when autoscaling"
+    },
+    "autoscale_max_pool": {
+      "type": "number",
+      "default": 50,
+      "description": "Maximum pool size when autoscaling"
+    },
+    "autoscale_target_queue_depth": {
+      "type": "number",
+      "default": 5,
+      "description": "Target queue depth \u2014 scale up when exceeded, down when below"
+    },
+    "screenshot_retention_days": {
+      "type": "number",
+      "default": 30
+    },
+    "log_retention_days": {
+      "type": "number",
+      "default": 14
+    },
+    "video_retention_days": {
+      "type": "number",
+      "default": 7
+    },
+    "auto_delete_expired": {
+      "type": "boolean",
+      "default": true,
+      "description": "Auto-delete screenshots, logs, and videos after retention period"
+    },
+    "captcha_provider": {
+      "type": "string",
+      "enum": [
+        "none",
+        "2captcha",
+        "anticaptcha",
+        "capmonster"
+      ],
+      "default": "none"
+    },
+    "ip_allowlist": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IP addresses allowed to access the API"
+    },
+    "enable_recording_by_default": {
+      "type": "boolean",
+      "default": false
+    },
+    "enable_cdp_by_default": {
+      "type": "boolean",
+      "default": false
+    },
+    "enforce_https": {
+      "type": "boolean",
+      "default": false,
+      "description": "Only allow navigation to HTTPS URLs"
+    },
+    "max_steps_per_job": {
+      "type": "number",
+      "default": 100
+    },
+    "max_job_duration_min": {
+      "type": "number",
+      "default": 30
+    },
+    "default_proxy_id": {
+      "type": "string",
+      "description": "Default proxy to use for all sessions"
+    },
+    "saml_config": {
+      "type": "object",
+      "description": "SAML 2.0 SSO config: { entry_point, issuer, cert, audience, want_assertions_signed }"
+    },
+    "oidc_config": {
+      "type": "object",
+      "description": "OIDC SSO config: { issuer, client_id, client_secret_encrypted, scopes, redirect_uri }"
+    },
+    "compliance_frameworks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "soc2_type1",
+          "soc2_type2",
+          "hipaa",
+          "gdpr",
+          "pci_dss",
+          "iso_27001"
+        ]
+      },
+      "description": "Active compliance frameworks \u2014 controls enforced per framework"
+    }
+  },
+  "required": [],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

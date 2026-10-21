@@ -1,0 +1,47 @@
+{
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 9 * * *",
+      "one_time_date": null,
+      "timezone": "America/New_York",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Daily READ-class intelligence sweep: researches the top Google searched words, categories, and phrases across all niches, stores a KeywordIntelligence report, and alerts admins via notification + email.",
+  "name": "Keyword Intelligence Daily",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "keyword_intelligence_daily",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_intel": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runKeywordIntelligence",
+            "args": {
+              "triggered_by": "scheduled"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run keyword intelligence",
+            "description": "Top words, categories, phrases"
+          }
+        }
+      }
+    ]
+  }
+}

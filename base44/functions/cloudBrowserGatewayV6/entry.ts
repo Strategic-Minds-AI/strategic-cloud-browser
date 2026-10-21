@@ -1,0 +1,118 @@
+import { createClientFromRequest } from "npm:@base44/sdk@0.8.40";
+import { enginePost, engineDelete, isEngineConfigured, setEngineClient } from "../../shared/engineClient.ts";
+import { DEPLOYMENT_VERSION } from "../../shared/deploymentVersion.ts";
+import {
+  hashKey, deriveClientIP, ipAllowed, checkRateLimit, matchRoute, ROUTE_SCOPES, dispatch
+} from "../../shared/gatewayCore.ts";
+import { enforceConcurrencyQuota } from "../../shared/concurrencyQuotas.ts";
+
+// ═══════════════════════════════════════════════
+// CloudBrowser Gateway V6 — fresh deployed identity
+// Complete production gateway with project-scoped tenant isolation.
+// GATEWAY_IDENTITY marker proves SOURCE = DEPLOYED = INVOKED.
+// ═══════════════════════════════════════════════
+
+const GATEWAY_IDENTITY = "cloudBrowserGatewayV6";
+
+function errorResponse(status, error, requestId) {
+  return Response.json({ error, request_id: requestId, __v: DEPLOYMENT_VERSION, gateway: GATEWAY_IDENTITY }, { status });
+}
+
+export default async function (req) {
+  const base44 = createClientFromRequest(req);
+  setEngineClient(base44);
+  const requestId = req.headers.get("x-request-id") || "req_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+
+  try {
+    let body;
+    try {
+      body = await req.json();
+    } catch (_parseError) {
+      return errorResponse(400, "Invalid JSON request body", requestId);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return errorResponse(400, "Request body must be a JSON object", requestId);
+    }
+    const { path: requestPath, method: requestMethod = "GET", data = {} } = body;
+    if (typeof requestPath !== "string" || !requestPath.trim() ||
+        typeof requestMethod !== "string" ||
+        !data || typeof data !== "object" || Array.isArray(data)) {
+      return errorResponse(400, "Request requires a path, a valid method, and an object data field", requestId);
+    }
+
+    const authHeader = req.headers.get("authorization") || "";
+    const headerKey = authHeader.replace(/^Bearer\s+/i, "");
+    const headerIsApiKey = headerKey.startsWith("cb_live_") || headerKey.startsWith("cb_test_");
+    const apiKey = (headerIsApiKey ? headerKey : "") || body.api_key || "";
+
+    if (!apiKey) return errorResponse(401, "Missing API key. Provide Authorization: Bearer <key> header.", requestId);
+
+    const keyHash = await hashKey(apiKey);
+    const keys = await base44.asServiceRole.entities.ApiKey.filter({ key_hash: keyHash, active: true });
+    if (!keys.length) return errorResponse(401, "Invalid or revoked API key", requestId);
+    const keyRecord = keys[0];
+
+    if (keyRecord.expires_at && new Date(keyRecord.expires_at) < new Date()) {
+      return errorResponse(401, "API key expired", requestId);
+    }
+
+    base44.asServiceRole.entities.ApiKey.update(keyRecord.id, { last_used: new Date().toISOString() }).catch(() => {});
+
+    const settings = await base44.asServiceRole.entities.SystemSettings.list("-created_date", 1);
+    const sysSettings = settings[0] || {};
+
+    if (sysSettings.ip_allowlist?.length) {
+      const ip = deriveClientIP(req);
+      if (!ip) return errorResponse(403, "Unable to determine client IP — allowlist requires transparent proxy header", requestId);
+      if (!ipAllowed(ip, sysSettings.ip_allowlist)) {
+        return errorResponse(403, `IP ${ip} is not allowlisted`, requestId);
+      }
+    }
+
+    const rateLimit = sysSettings.rate_limit_per_minute || 60;
+    if (!await checkRateLimit(base44, keyHash, rateLimit)) {
+      return errorResponse(429, "Rate limit exceeded", requestId);
+    }
+
+    const matched = matchRoute(requestMethod, requestPath);
+    if (!matched) return errorResponse(404, `Unknown route: ${requestMethod} ${requestPath}`, requestId);
+
+    const requiredScope = ROUTE_SCOPES[matched.route];
+    if (requiredScope && !(keyRecord.scopes || []).includes(requiredScope)) {
+      return errorResponse(403, `Insufficient scope. Required: ${requiredScope}`, requestId);
+    }
+
+    // Browserbase parity: per-project + per-store concurrency + session-creation rate limit
+    // with 429 + retry-after + x-ratelimit headers, enforced on session creation.
+    if (matched.route === "POST:/sessions") {
+      const quota = await enforceConcurrencyQuota(base44, keyRecord, data);
+      if (quota.status === 429) {
+        return new Response(JSON.stringify({
+          error: quota.error, request_id: requestId, __v: DEPLOYMENT_VERSION, gateway: GATEWAY_IDENTITY,
+        }), {
+          status: 429,
+          headers: { "content-type": "application/json", ...(quota.headers || {}) },
+        });
+      }
+      const dispatched = await dispatch(base44, matched.route, matched.params, data, keyRecord, requestId, GATEWAY_IDENTITY, enginePost, engineDelete, isEngineConfigured);
+      // Attach rate-limit headers to the success response
+      if (quota.headers) {
+        const body = await dispatched.text();
+        return new Response(body, {
+          status: dispatched.status,
+          headers: { "content-type": "application/json", ...(quota.headers || {}) },
+        });
+      }
+      return dispatched;
+    }
+
+    return await dispatch(base44, matched.route, matched.params, data, keyRecord, requestId, GATEWAY_IDENTITY, enginePost, engineDelete, isEngineConfigured);
+  } catch (error) {
+    // Keep internal/provider exception details out of client responses.
+    console.error("[GATEWAY] request failed", {
+      request_id: requestId,
+      error_type: error instanceof Error ? error.name : "UnknownError",
+    });
+    return errorResponse(500, "Internal gateway error", requestId);
+  }
+}

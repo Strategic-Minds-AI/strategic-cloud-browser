@@ -1,0 +1,164 @@
+{
+  "name": "SystemManifest",
+  "type": "object",
+  "properties": {
+    "system_name": {
+      "type": "string",
+      "description": "Human-readable system name (e.g. CloudBrowser, Xtreme Auto Builder)"
+    },
+    "canonical_repo": {
+      "type": "string",
+      "description": "Canonical GitHub repo (org/repo)"
+    },
+    "canonical_branch": {
+      "type": "string",
+      "default": "main"
+    },
+    "canonical_sha": {
+      "type": "string",
+      "description": "Immutable source SHA the system is pinned to"
+    },
+    "base44_app_id": {
+      "type": "string",
+      "description": "Base44 app ID if this is a Base44 app"
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "vercel",
+        "railway",
+        "base44",
+        "supabase",
+        "hybrid",
+        "unknown"
+      ],
+      "default": "unknown"
+    },
+    "data_plane": {
+      "type": "string",
+      "description": "Where durable data lives (Supabase project, Base44, etc.)"
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Production domains"
+    },
+    "owner": {
+      "type": "string",
+      "description": "Owning lane / operator"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "medium"
+    },
+    "health_score": {
+      "type": "number",
+      "default": 0,
+      "description": "Current production-readiness score (0-100)"
+    },
+    "health_state": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "blocked",
+        "unbenchmarked",
+        "verified_100"
+      ],
+      "default": "unbenchmarked"
+    },
+    "autocomplete_mode": {
+      "type": "string",
+      "enum": [
+        "COMPLETION_SPRINT",
+        "DRY_RUN",
+        "READ_ONLY",
+        "QUARANTINE"
+      ],
+      "default": "READ_ONLY"
+    },
+    "protected_gate": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether release/production/secrets/destructive actions require approval"
+    },
+    "canonical_source": {
+      "type": "string",
+      "description": "Canonical source authority label (e.g. XTREME-SYSTEMS/cloudbrowser-control)"
+    },
+    "portfolio_status": {
+      "type": "string",
+      "enum": [
+        "keep",
+        "review",
+        "copy_review",
+        "quarantine",
+        "retire"
+      ],
+      "default": "review"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "registered",
+        "constituted",
+        "baselined",
+        "repairing",
+        "validated",
+        "verified_100",
+        "blocked_source_truth"
+      ],
+      "default": "registered"
+    },
+    "what_is_wrong": {
+      "type": "string",
+      "description": "Current known defects / blockers"
+    },
+    "path_to_100": {
+      "type": "string",
+      "description": "Exact deterministic path to VERIFIED_100"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "registered_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "system_name",
+    "status"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

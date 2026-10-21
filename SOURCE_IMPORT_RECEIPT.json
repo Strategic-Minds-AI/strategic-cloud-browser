@@ -1,0 +1,9 @@
+{
+  "source_repo": "XTREME-SYSTEMS/cloudbrowser-control",
+  "source_sha": "f45e86a651a877bbd9c340e3ebefd65a8167ae5b",
+  "target_repo": "Strategic-Minds-AI/strategic-cloud-browser",
+  "target_branch": "install/cloudbrowser-staging-20261020",
+  "target_railway_environment": "NOT_DEPLOYED",
+  "autonomous_workers_enabled": false,
+  "notes": "Staging candidate. No production cutover, secrets migration, independent Guardian receipt, or E2E browser approval."
+}

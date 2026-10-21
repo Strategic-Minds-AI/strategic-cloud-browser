@@ -1,0 +1,141 @@
+{
+  "name": "Proxy",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "server": {
+      "type": "string",
+      "description": "Proxy server URL (host:port)"
+    },
+    "username": {
+      "type": "string"
+    },
+    "password_encrypted": {
+      "type": "string",
+      "description": "AES-GCM encrypted proxy password (base64). Never returned to frontend."
+    },
+    "has_password": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether a password is configured (safe for frontend display)"
+    },
+    "country": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string",
+      "description": "City-level geo-targeting (e.g. 'new york', 'los angeles')"
+    },
+    "state": {
+      "type": "string",
+      "description": "State/region-level geo-targeting (e.g. 'ny', 'ca')"
+    },
+    "asn": {
+      "type": "string",
+      "description": "ASN-level targeting (e.g. 'AS12345' for specific ISP)"
+    },
+    "zip_code": {
+      "type": "string",
+      "description": "ZIP/postal code-level geo-targeting"
+    },
+    "protocol": {
+      "type": "string",
+      "enum": [
+        "http",
+        "https",
+        "socks5"
+      ],
+      "default": "http"
+    },
+    "ip_type": {
+      "type": "string",
+      "enum": [
+        "residential",
+        "datacenter",
+        "mobile",
+        "isp"
+      ],
+      "default": "datacenter",
+      "description": "IP type \u2014 residential/mobile for anti-bot bypass, datacenter for speed"
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "custom",
+        "bright_data",
+        "smartproxy",
+        "oxylabs",
+        "iproyal",
+        "soax"
+      ],
+      "default": "custom",
+      "description": "Proxy provider \u2014 enables API-based rotation for commercial networks"
+    },
+    "rotation_group": {
+      "type": "string",
+      "description": "Group name for round-robin rotation"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "health_score": {
+      "type": "number",
+      "default": 50,
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0-100 health score; auto-evicted below 10"
+    },
+    "last_tested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_exit_ip": {
+      "type": "string",
+      "description": "Last observed egress IP"
+    },
+    "consecutive_failures": {
+      "type": "number",
+      "default": 0
+    },
+    "last_latency_ms": {
+      "type": "number",
+      "description": "Last test latency in milliseconds"
+    }
+  },
+  "required": [
+    "name",
+    "server"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
