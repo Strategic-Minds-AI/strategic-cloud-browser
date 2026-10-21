@@ -11,7 +11,8 @@ WORKDIR /app
 # Consistent repo-root Docker build context for all three CloudBrowser services.
 COPY browser-engine/package.json browser-engine/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
-RUN npx playwright install chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx playwright install chromium && chmod -R a+rX /ms-playwright
 
 COPY browser-engine/server.js ./
 COPY browser-engine/network-policy.js ./
@@ -27,4 +28,6 @@ ENV DEFAULT_TIMEOUT=30000
 ENV SESSION_TTL_MS=300000
 
 EXPOSE 8080
+RUN mkdir -p /tmp/videos && chown -R node:node /tmp/videos /app
+USER node
 CMD ["node", "server.js"]
