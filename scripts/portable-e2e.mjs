@@ -56,12 +56,28 @@ try {
   assert.ok(screenshot.body.size > 500);
   assert.ok(typeof screenshot.body.base64 === "string" && screenshot.body.base64.length > 1000);
 
+  // Regression for live engine defect: no-selector extraction must work.
+  // Both actions use the real Playwright page after navigation.
+  const plainText = await request("/v1/sessions/" + encodeURIComponent(sessionId) + "/execute", {
+    key: keyA, method: "POST", data: { action_type: "extract_text" }
+  });
+  assert.equal(plainText.status, 200, "selector-free text: " + JSON.stringify(plainText.body).slice(0, 500));
+  assert.ok(typeof plainText.body.data === "string" && plainText.body.data.length > 0,
+    "selector-free text should produce non-empty body text");
+
+  const fullHtml = await request("/v1/sessions/" + encodeURIComponent(sessionId) + "/execute", {
+    key: keyA, method: "POST", data: { action_type: "extract_html" }
+  });
+  assert.equal(fullHtml.status, 200, "selector-free HTML: " + JSON.stringify(fullHtml.body).slice(0, 500));
+  assert.ok(typeof fullHtml.body.data === "string" && /<html[\\s>]/i.test(fullHtml.body.data),
+    "selector-free HTML should produce a full HTML document");
+
   const unsafe = await request("/v1/sessions/" + encodeURIComponent(sessionId) + "/execute", {
     key: keyA, method: "POST", data: { action_type: "evaluate", value: "document.cookie" }
   });
   assert.equal(unsafe.status, 400, "arbitrary JS evaluation exposed by public gateway");
 
-  console.log("PASS: temporary API engine auth, tenant isolation, session navigation and screenshot");
+  console.log("PASS: temporary API engine auth, tenant isolation, session navigation, screenshot and selector-free extraction");
 } finally {
   if (sessionId) {
     const closed = await request("/v1/sessions/" + encodeURIComponent(sessionId), {
