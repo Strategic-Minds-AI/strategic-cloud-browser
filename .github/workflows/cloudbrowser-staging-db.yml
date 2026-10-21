@@ -45,8 +45,8 @@ jobs:
             sleep 2
           done
           docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('tenants','jobs','api_keys','session_owners')" | grep -qx 4
-          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT rolbypassrls::text FROM pg_roles WHERE rolname='cloudbrowser_api_login'" | grep -qx f
-          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_function_privilege('cloudbrowser_api_login','cloudbrowser_private.lookup_api_key(text,text)','EXECUTE')::text" | grep -qx t
-          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_table_privilege('cloudbrowser_api_login','public.api_keys','SELECT')::text" | grep -qx f
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT rolbypassrls FROM pg_roles WHERE rolname='cloudbrowser_api_login'" | grep -qx f
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_function_privilege('cloudbrowser_api_login','cloudbrowser_private.lookup_api_key(text,text)','EXECUTE')" | grep -qx t
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_table_privilege('cloudbrowser_api_login','public.api_keys','SELECT')" | grep -qx f
           docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT count(*) FROM pg_policies WHERE tablename='session_owners'" | grep -qx 1
           echo 'PASS: Postgres bootstrap schema, restricted API login, RLS and lookup function'
