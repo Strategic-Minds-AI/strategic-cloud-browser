@@ -137,14 +137,26 @@ router.post("/", async (req, res, next) => {
   try {
     requireScopes(req.auth, ["sessions:write"]);
     const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    // Public API accepts url; engine startup navigation expects target_url.
+    // Normalize explicitly, otherwise sessions succeed without loading the URL.
     if (body.url !== undefined && typeof body.url !== "string") {
       throw new ValidationError("url must be a string");
+    }
+    if (body.target_url !== undefined && typeof body.target_url !== "string") {
+      throw new ValidationError("target_url must be a string");
+    }
+    if (body.url && body.target_url && body.url !== body.target_url) {
+      throw new ValidationError("url and target_url disagree");
     }
     if (body.usePool !== undefined && typeof body.usePool !== "boolean") {
       throw new ValidationError("usePool must be a boolean");
     }
+    const targetUrl = body.target_url ?? body.url;
+    const engineBody = { ...body };
+    delete engineBody.url;
+    if (targetUrl !== undefined) engineBody.target_url = targetUrl;
 
-    const { status, payload } = await engineRequest("/sessions", { method: "POST", body });
+    const { status, payload } = await engineRequest("/sessions", { method: "POST", body: engineBody });
     if (status === 503) throw new UpstreamError("engine is at maximum concurrent sessions");
     if (status >= 400) throw new UpstreamError(`engine session create failed with ${status}`);
 
@@ -155,7 +167,7 @@ router.post("/", async (req, res, next) => {
 
     res.status(201).json({
       ...toApiSession(
-        { sessionId, status: payload.status, url: body.url ?? null, createdAt: payload.createdAt },
+        { sessionId, status: payload.status, url: targetUrl ?? null, createdAt: payload.createdAt },
         req.auth.tenantId,
       ),
       from_pool: Boolean(payload.fromPool),
