@@ -195,7 +195,7 @@ jobs:
             postgres:17-alpine
           trap 'docker rm -f cloudbrowser-rls-ci >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
-            if docker exec cloudbrowser-rls-ci pg_isready -U postgres -d cloudbrowser_qa >/dev/null 2>&1; then
+            if docker exec cloudbrowser-rls-ci psql -U postgres -d cloudbrowser_qa -Atqc "SELECT 1" >/dev/null 2>&1; then
               break
             fi
             sleep 1
