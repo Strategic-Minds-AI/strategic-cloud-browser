@@ -1,0 +1,121 @@
+{
+  "schema_version": "x1.cloudbrowser.portable-staging.v1",
+  "kind": "staging-blueprint-not-railway-native-template",
+  "release_state": "DRAFT_NOT_DEPLOYED",
+  "repository": "Strategic-Minds-AI/strategic-cloud-browser",
+  "source_commit": "fb7deb0d1bc976582089bdfc5b168cc0303cac81",
+  "source_branch": "repair/railway-docker-context-20261021",
+  "deployment_policy": {
+    "environment": "staging-only",
+    "copy_production_secrets": false,
+    "copy_production_data": false,
+    "enable_worker": false,
+    "publish_gateway": false,
+    "launch_external_jobs": false,
+    "min_replicas": 1,
+    "approval_required_for_billable_activation": true
+  },
+  "services": [
+    {
+      "name": "cloudbrowser-postgres",
+      "type": "postgres",
+      "source": "postgres:17-alpine",
+      "replicas": 1,
+      "volume": {
+        "mount_path": "/var/lib/postgresql/data",
+        "minimum_mb": 1024
+      },
+      "variable_names": [
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "PGDATA"
+      ],
+      "migration_files": [
+        "db/migrations/001_portable_core.sql",
+        "db/migrations/002_secure_api_auth.sql"
+      ],
+      "post_migration_checks": [
+        "create least-privilege cloudbrowser_api_login role using approved secret",
+        "GRANT cloudbrowser_api TO cloudbrowser_api_login",
+        "verify RLS under non-superuser identity",
+        "verify private lookup function EXECUTE permissions"
+      ]
+    },
+    {
+      "name": "cloudbrowser-engine",
+      "type": "github",
+      "repo": "Strategic-Minds-AI/strategic-cloud-browser",
+      "branch": "repair/railway-docker-context-20261021",
+      "commit": "fb7deb0d1bc976582089bdfc5b168cc0303cac81",
+      "context": "repository-root",
+      "dockerfile": "browser-engine/Dockerfile",
+      "healthcheck": "/health",
+      "internal_port": 8080,
+      "replicas": 1,
+      "variable_names": [
+        "ENGINE_API_KEY",
+        "PORT",
+        "MAX_SESSIONS",
+        "POOL_SIZE",
+        "ENFORCE_HTTPS",
+        "CRAWL_MAX_PAGES",
+        "NODE_ENV"
+      ],
+      "public_domain": false,
+      "default_security": {
+        "max_sessions": 1,
+        "pool_size": 0,
+        "enable_https": true
+      }
+    },
+    {
+      "name": "cloudbrowser-api",
+      "type": "github",
+      "repo": "Strategic-Minds-AI/strategic-cloud-browser",
+      "branch": "repair/railway-docker-context-20261021",
+      "commit": "fb7deb0d1bc976582089bdfc5b168cc0303cac81",
+      "context": "repository-root",
+      "dockerfile": "api/Dockerfile",
+      "healthcheck": "/health",
+      "internal_port": 4000,
+      "replicas": 1,
+      "variable_names": [
+        "API_KEY_PEPPER",
+        "API_PORT",
+        "ENGINE_API_KEY",
+        "ENGINE_URL",
+        "DATABASE_URL",
+        "NODE_ENV"
+      ],
+      "suggested_internal_engine_url": "http://cloudbrowser-engine.railway.internal:8080",
+      "public_domain": false,
+      "requires_tenant_api_key_bootstrap": true
+    }
+  ],
+  "work_items_before_activation": [
+    "Confirm staged source SHA matches the GitHub branch and release gates",
+    "Verify database POSTGRES_* and PGDATA are valid and dedicated to staging",
+    "Set staging-only DATABASE_URL to least-privileged application role; never use database owner/superuser for API",
+    "Verify API ENGINE_URL private DNS and matching engine key reference without copying production secrets",
+    "Apply portable schema migrations to staging with evidence, then test least-privilege access",
+    "Do not enable worker, queue consumer, public CDP, direct engine domain or cron",
+    "Obtain target-specific budget/paid deployment approval before applying the staged patch"
+  ],
+  "mandatory_acceptance": [
+    "CI lockfiles/build/security/RLS negative tests against exact SHA",
+    "Staging health API and engine",
+    "Unauthorized and wrong-tenant requests rejected",
+    "Staging DB migration version and RLS negative checks under application role",
+    "Authorized create/execute/screenshot/delete session with synthetic account",
+    "SSRF denies localhost, metadata IP, IPv6 private networks and DNS redirects",
+    "Timeout, concurrency, teardown and rollback procedures",
+    "Distinct independent Guardian receipt at deployed SHA"
+  ],
+  "known_blockers_as_of_2026_10_21": [
+    "Railway staging patch uncommitted: 37 changes; services and volume not deployed",
+    "Staged API variable list does not include DATABASE_URL",
+    "Staging database migrations and least-privilege API login role not validated",
+    "Deployment approval and distinct Guardian receipt absent"
+  ]
+}
