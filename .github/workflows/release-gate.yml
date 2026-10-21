@@ -225,6 +225,55 @@ jobs:
           export CB_E2E_API_KEY_B="cb_test_qaabcde1_${CB_SECRET_B}"
           node scripts/portable-e2e.mjs
 
+  database-image:
+    name: Isolated PostgreSQL Bootstrap and Restricted Login
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build isolated staging PG17 image and test real restricted login
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f db/Dockerfile -t cloudbrowser-postgres:smoke .
+          # Passwords below are disposable CI fixtures only; never provider credentials.
+          export CI_PG_OWNER='ci-owner-only-synthetic-pass-0123456789abcdef'
+          export CI_PG_API='ci-app-only-synthetic-pass-abcdef0123456789'
+          docker run -d --name cloudbrowser-pg-image-ci \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=cloudbrowser_ci \
+            -e POSTGRES_PASSWORD="$CI_PG_OWNER" \
+            -e CLOUDBROWSER_API_DB_PASSWORD="$CI_PG_API" \
+            cloudbrowser-postgres:smoke
+          trap 'docker rm -f cloudbrowser-pg-image-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 45); do
+            if docker exec cloudbrowser-pg-image-ci psql -U postgres -d cloudbrowser_ci -Atqc "SELECT 1" >/dev/null 2>&1; then break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' cloudbrowser-pg-image-ci)" != true ]; then
+              docker logs cloudbrowser-pg-image-ci 2>&1 | tail -35
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec cloudbrowser-pg-image-ci psql -U postgres -d cloudbrowser_ci -Atqc \
+            "SELECT 1 FROM pg_roles WHERE rolname='cloudbrowser_api_login' AND NOT rolbypassrls AND NOT rolsuper" | grep -qx 1
+          ROLE_PROOF=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT current_user||':'||rolbypassrls FROM pg_roles WHERE rolname=current_user")
+          test "$ROLE_PROOF" = 'cloudbrowser_api_login:false' || test "$ROLE_PROOF" = 'cloudbrowser_api_login:f'
+          ROWS=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc "SELECT COUNT(*) FROM public.jobs")
+          test "$ROWS" = 0
+          DIRECT_READ=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT has_table_privilege(current_user,'public.api_keys','SELECT')")
+          test "$DIRECT_READ" = f
+          LOOKUP=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT COUNT(*) FROM cloudbrowser_private.lookup_api_key('absent','cb_test')")
+          test "$LOOKUP" = 0
+          echo "PASS: staged DB image initializes schema and restricted, RLS-only API role"
+
   db-isolation:
     name: PostgreSQL 17 RLS Negative Integration
     runs-on: ubuntu-latest
@@ -258,6 +307,6 @@ jobs:
   release-status:
     name: Release Gate Status
     runs-on: ubuntu-latest
-    needs: [code-quality, engine-syntax, security-audit, portable-containers, db-isolation]
+    needs: [code-quality, engine-syntax, security-audit, portable-containers, db-isolation, database-image]
     steps:
       - run: echo "All required gates passed - release candidate verified"
