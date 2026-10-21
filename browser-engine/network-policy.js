@@ -111,11 +111,19 @@ export async function validateOutboundTarget(urlStr, { enforceHttps = false, res
 }
 
 export async function installOutboundGuard(context, options = {}) {
-  // This must be registered after other context routes. Playwright routes use
-  // reverse registration order; this guard must run before mock/block handlers.
+  // Deny WebSocket egress outright until a socket-level outbound policy exists.
+  // Playwright >= 1.48 supports routeWebSocket; fail closed on older runtimes.
+  if (typeof context.routeWebSocket !== "function")
+    throw new Error("Unsupported browser runtime: WebSocket egress guard unavailable");
+  await context.routeWebSocket("**/*", (route) =>
+    route.close({ code: 1008, reason: "WebSocket egress disabled" })
+  );
+
+  // Context route handlers run newest first in Playwright. Register this last:
+  // authorize the request before delegating to resource-block/mock routes.
   await context.route("**/*", async (route) => {
     const check = await validateOutboundTarget(route.request().url(), options);
     if (!check.ok) return route.abort("blockedbyclient");
-    return route.continue();
+    return route.fallback();
   });
 }
