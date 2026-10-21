@@ -12,6 +12,7 @@ import {
   NotFoundError,
 } from "./lib/http.js";
 import { authenticate } from "./lib/auth.js";
+import { assertApiStartupConfig } from "./lib/startup-config.js";
 import jobsRouter from "./routes/jobs.js";
 import sessionsRouter from "./routes/sessions.js";
 
@@ -121,6 +122,7 @@ const isEntrypoint =
   Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (isEntrypoint) {
+  assertApiStartupConfig();
   const port = Number(process.env.API_PORT || 4000);
   const server = createApp().listen(port, () => {
     console.log(JSON.stringify({ level: "info", msg: "api_listening", port, version: API_VERSION }));
