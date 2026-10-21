@@ -222,7 +222,15 @@ jobs:
           export CB_E2E_BASE_URL=http://127.0.0.1:41000
           export CB_E2E_API_KEY_A="cb_test_qaabcdef_${CB_SECRET_A}"
           export CB_E2E_API_KEY_B="cb_test_qaabcde1_${CB_SECRET_B}"
-          node scripts/portable-e2e.mjs
+          if ! node scripts/portable-e2e.mjs; then
+            echo "::group::Chromium container diagnostic (redacted, filtered)"
+            docker logs --tail 120 cb-ci-engine 2>&1 |
+              grep -Ei 'sandbox|namespace|zygote|Operation not permitted|Failed to launch|chromium|seccomp|Permission denied|browserType.launch' |
+              sed -E 's/cb_(test|live)_[A-Za-z0-9_-]+/[REDACTED]/g' |
+              tail -30 || true
+            echo "::endgroup::"
+            exit 1
+          fi
 
   db-isolation:
     name: PostgreSQL 17 RLS Negative Integration
