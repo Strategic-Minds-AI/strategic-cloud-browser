@@ -538,7 +538,7 @@ test("every environment variable used by the new services is documented", () => 
 
   for (const file of walkPortableFiles()) {
     const relative = path.relative(repoRoot, file);
-    if (!/^(api|worker|shared)\//.test(relative)) continue;
+    if (!/^(api|worker|shared)[\\/]/.test(relative)) continue;
     if (!/\.(js|mjs)$/.test(relative)) continue;
     const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)) used.add(match[1]);
