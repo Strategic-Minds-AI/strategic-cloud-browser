@@ -178,6 +178,46 @@ router.post("/", async (req, res, next) => {
   }
 });
 
+// POST /v1/sessions/:id/execute — tenant-checked subset of browser commands.
+// Never expose generic evaluate, arbitrary page code, filesystem/proxy, or
+// unbounded crawler actions through the public API.
+const ALLOWED_SESSION_ACTIONS = new Set([
+  "goto", "back", "forward", "reload", "wait_for_selector",
+  "click", "fill", "extract_text", "extract_html", "screenshot"
+]);
+
+router.post("/:id/execute", async (req, res, next) => {
+  try {
+    requireScopes(req.auth, ["sessions:write"]);
+    await assertOwned(req.auth.tenantId, req.params.id);
+    const action = req.body;
+    if (!action || typeof action !== "object" || Array.isArray(action) ||
+        typeof action.action_type !== "string" ||
+        !ALLOWED_SESSION_ACTIONS.has(action.action_type)) {
+      throw new ValidationError("Unsupported session action");
+    }
+    const opts = action.options;
+    if (opts !== undefined && (!opts || typeof opts !== "object" || Array.isArray(opts))) {
+      throw new ValidationError("options must be an object");
+    }
+    const payloadToEngine = {
+      action_type: action.action_type,
+      selector: action.selector,
+      value: action.value,
+      options: opts ?? {},
+    };
+    const { status, payload } = await engineRequest(
+      `/sessions/${encodeURIComponent(req.params.id)}/execute`,
+      { method: "POST", body: payloadToEngine },
+    );
+    if (status === 404) throw new NotFoundError("Session not found");
+    if (status >= 400) throw new UpstreamError(`Engine command rejected with ${status}`);
+    res.json(payload);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /v1/sessions/:id
 router.get("/:id", async (req, res, next) => {
   try {
