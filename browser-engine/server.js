@@ -551,7 +551,7 @@ api.post("/sessions", async (req, res) => {
     if (opts.blockedResources?.length > 0) {
       context.route("**/*", (route) => {
         const type = route.request().resourceType();
-        return opts.blockedResources.includes(type) ? route.abort() : route.continue();
+        return opts.blockedResources.includes(type) ? route.abort() : route.fallback();
       });
     }
 
