@@ -600,6 +600,16 @@ api.post("/sessions", async (req, res) => {
       expiresAt: new Date(session.createdAt + SESSION_TTL_MS).toISOString(),
     });
   } catch (err) {
+    // Classify failures without leaking request URLs, browser stderr or secrets.
+    const message = String(err?.message || "");
+    const reason = /No usable sandbox|Failed to move to new namespace|Operation not permitted|zygote host|Failed to unshare|seccomp/i.test(message)
+      ? "CHROMIUM_SANDBOX_UNAVAILABLE"
+      : /Executable doesn't exist|Failed to launch|browserType.launch/i.test(message)
+        ? "CHROMIUM_LAUNCH_FAILURE"
+        : /ENOSPC|ENOMEM|Too many open files/i.test(message)
+          ? "RUNTIME_RESOURCE_EXHAUSTED"
+          : "SESSION_CREATION_ERROR";
+    console.error("ENGINE_SESSION_START_FAILED:" + reason);
     // A failed browser launch/navigation must not leak a process or context.
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
