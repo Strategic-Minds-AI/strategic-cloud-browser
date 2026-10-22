@@ -1,0 +1,52 @@
+name: CloudBrowser staging PostgreSQL bootstrap
+on:
+  push:
+    branches: [ops/cloudbrowser-portable-staging-template-20261021]
+    paths:
+      - 'db/staging/**'
+      - 'db/migrations/**'
+      - '.github/workflows/cloudbrowser-staging-db.yml'
+  pull_request:
+    paths:
+      - 'db/staging/**'
+      - 'db/migrations/**'
+      - '.github/workflows/cloudbrowser-staging-db.yml'
+permissions:
+  contents: read
+jobs:
+  staging-db-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: sh -n db/staging/030_create_api_login.sh
+      - name: Build staging PostgreSQL image from repo root
+        run: docker build -f db/staging/Dockerfile -t x1-cloudbrowser-postgres:staging .
+      - name: Verify migrations and least-privilege role on a disposable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name x1-cb-pg-ci \
+            -e POSTGRES_USER=cloudbrowser_owner \
+            -e POSTGRES_PASSWORD=ci-ephemeral-owner-password \
+            -e POSTGRES_DB=cloudbrowser_staging \
+            -e CLOUDBROWSER_API_ROLE_PASSWORD=ci-ephemeral-app-password \
+            x1-cloudbrowser-postgres:staging
+          trap 'docker rm -f x1-cb-pg-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 50); do
+            state=$(docker inspect -f '{{.State.Status}}' x1-cb-pg-ci)
+            if [ "$state" != 'running' ]; then
+              docker logs x1-cb-pg-ci
+              exit 1
+            fi
+            if docker exec x1-cb-pg-ci pg_isready -U cloudbrowser_owner -d cloudbrowser_staging >/dev/null 2>&1 &&
+               docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT count(*) FROM pg_roles WHERE rolname='cloudbrowser_api_login'" | grep -qx 1; then break; fi
+            sleep 2
+          done
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('tenants','jobs','api_keys','session_owners')" | grep -qx 4
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT rolbypassrls FROM pg_roles WHERE rolname='cloudbrowser_api_login'" | grep -qx f
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_function_privilege('cloudbrowser_api_login','cloudbrowser_private.lookup_api_key(text,text)','EXECUTE')" | grep -qx t
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT has_table_privilege('cloudbrowser_api_login','public.api_keys','SELECT')" | grep -qx f
+          docker exec x1-cb-pg-ci psql -U cloudbrowser_owner -d cloudbrowser_staging -Atqc "SELECT count(*) FROM pg_policies WHERE tablename='session_owners'" | grep -qx 1
+          echo 'PASS: Postgres bootstrap schema, restricted API login, RLS and lookup function'
