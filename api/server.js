@@ -123,8 +123,9 @@ const isEntrypoint =
 
 if (isEntrypoint) {
   assertApiStartupConfig();
-  const port = Number(process.env.API_PORT || 4000);
-  const server = createApp().listen(port, () => {
+  // Railway injects PORT for healthchecks; prefer it over the legacy API_PORT.
+  const port = Number(process.env.PORT || process.env.API_PORT || 4000);
+  const server = createApp().listen(port, "0.0.0.0", () => {
     console.log(JSON.stringify({ level: "info", msg: "api_listening", port, version: API_VERSION }));
   });
 
