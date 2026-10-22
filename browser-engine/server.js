@@ -265,7 +265,8 @@ async function warmPool() {
     try {
       const browser = await chromium.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        chromiumSandbox: true,
+        args: ["--disable-dev-shm-usage"],
       });
       const context = await browser.newContext({ serviceWorkers: "block" });
       await installOutboundGuard(context, { enforceHttps: ENFORCE_HTTPS });
@@ -397,7 +398,7 @@ api.get("/liveness", (req, res) => res.json({ ok: true, worker_id: WORKER_ID }))
 
 api.get("/readiness", async (req, res) => {
   try {
-    const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    const browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: ["--disable-dev-shm-usage"] });
     await browser.close();
     res.json({ ok: true, browser_launch: "verified", worker_id: WORKER_ID });
   } catch (e) {
@@ -471,7 +472,7 @@ api.post("/sessions", async (req, res) => {
 
     if (sessions.size >= MAX_SESSIONS) return res.status(503).json({ error: "Max concurrent sessions reached" });
 
-    const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+    const launchArgs = ["--disable-dev-shm-usage"];
     if (opts.blockedResources?.includes("images")) launchArgs.push("--blink-settings=imagesEnabled=false");
 
     // Extensions
@@ -508,7 +509,7 @@ api.post("/sessions", async (req, res) => {
     if (effectiveProxy) contextOptions.proxy = { server: effectiveProxy.server, username: effectiveProxy.username, password: effectiveProxy.password };
 
     if (opts.userDataDir) {
-      context = await chromium.launchPersistentContext(opts.userDataDir, { headless: true, args: launchArgs, ...contextOptions });
+      context = await chromium.launchPersistentContext(opts.userDataDir, { headless: true, args: launchArgs, ...contextOptions, chromiumSandbox: true });
       page = context.pages()[0] || await context.newPage();
       await context.addInitScript(buildStealthScript(opts.userDataDir));
       // TASK 8: Full fingerprint randomization
@@ -517,7 +518,7 @@ api.post("/sessions", async (req, res) => {
         await context.addInitScript(getFingerprintInitScript(fp));
       }
     } else {
-      browser = await chromium.launch({ headless: true, args: launchArgs });
+      browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: launchArgs });
       context = await browser.newContext(contextOptions);
       await context.addInitScript(buildStealthScript(Math.random().toString(36).slice(2)));
       // TASK 8: Full fingerprint randomization
@@ -599,6 +600,16 @@ api.post("/sessions", async (req, res) => {
       expiresAt: new Date(session.createdAt + SESSION_TTL_MS).toISOString(),
     });
   } catch (err) {
+    // Classify failures without leaking request URLs, browser stderr or secrets.
+    const message = String(err?.message || "");
+    const reason = /No usable sandbox|Failed to move to new namespace|Operation not permitted|zygote host|Failed to unshare|seccomp/i.test(message)
+      ? "CHROMIUM_SANDBOX_UNAVAILABLE"
+      : /Executable doesn't exist|Failed to launch|browserType.launch/i.test(message)
+        ? "CHROMIUM_LAUNCH_FAILURE"
+        : /ENOSPC|ENOMEM|Too many open files/i.test(message)
+          ? "RUNTIME_RESOURCE_EXHAUSTED"
+          : "SESSION_CREATION_ERROR";
+    console.error("ENGINE_SESSION_START_FAILED:" + reason);
     // A failed browser launch/navigation must not leak a process or context.
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
