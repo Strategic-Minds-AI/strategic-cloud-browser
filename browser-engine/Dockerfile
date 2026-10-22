@@ -18,6 +18,7 @@ COPY browser-engine/server.js ./
 COPY browser-engine/network-policy.js ./
 COPY browser-engine/extract-content.js ./
 COPY browser-engine/session-manager.js ./
+COPY browser-engine/extract-content.js ./
 COPY browser-engine/fingerprint-randomizer.js ./
 COPY browser-engine/human-behavior.js ./
 
