@@ -214,6 +214,7 @@ jobs:
             cloudbrowser-engine:smoke
           docker run -d --name cb-ci-api --network cloudbrowser-ci-net \
             -p 127.0.0.1:41000:4000 \
+            -e PORT=4000 -e API_PORT=4001 \
             -e DATABASE_URL=postgresql://cloudbrowser_api_login:ci-only-role-password@cb-ci-db:5432/cloudbrowser_qa \
             -e API_KEY_PEPPER="$CB_PEPPER" \
             -e ENGINE_URL=http://cb-ci-engine:8080 \
