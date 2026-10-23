@@ -1,17 +1,14 @@
 FROM node:24-alpine
 
-WORKDIR /srv
+# Build from repository root; worker imports ../shared/db.js.
+WORKDIR /app
 
-# Dependencies first for layer caching. No lockfile is committed yet, so the
-# image installs from the range-pinned manifest (see docs/portable/DEPLOYMENT.md
-# for the lockfile follow-up).
-COPY package*.json ./
+COPY worker/package.json worker/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY . .
+COPY worker/ ./worker/
+COPY shared/ ./shared/
 
 ENV NODE_ENV=production
-
 USER node
-
-CMD ["node", "worker.js"]
+CMD ["node", "worker/worker.js"]

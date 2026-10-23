@@ -1,6 +1,8 @@
 import express from "express";
 import { requireScopes } from "../lib/auth.js";
 import { withTenant } from "../../shared/db.js";
+import { assertBrowserEngineReady } from "../lib/engine-attestation.js";
+import { buildSafeBrowserAction } from "../lib/browser-action-policy.js";
 import {
   ValidationError,
   NotFoundError,
@@ -137,14 +139,35 @@ router.post("/", async (req, res, next) => {
   try {
     requireScopes(req.auth, ["sessions:write"]);
     const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    // Public API accepts url; engine startup navigation expects target_url.
+    // Normalize explicitly, otherwise sessions succeed without loading the URL.
     if (body.url !== undefined && typeof body.url !== "string") {
       throw new ValidationError("url must be a string");
+    }
+    if (body.target_url !== undefined && typeof body.target_url !== "string") {
+      throw new ValidationError("target_url must be a string");
+    }
+    if (body.url && body.target_url && body.url !== body.target_url) {
+      throw new ValidationError("url and target_url disagree");
     }
     if (body.usePool !== undefined && typeof body.usePool !== "boolean") {
       throw new ValidationError("usePool must be a boolean");
     }
+    const targetUrl = body.target_url ?? body.url;
+    const engineBody = { ...body };
+    delete engineBody.url;
+    if (targetUrl !== undefined) engineBody.target_url = targetUrl;
 
-    const { status, payload } = await engineRequest("/sessions", { method: "POST", body });
+    // Check actual sandbox-enabled browser launch before any client-controlled
+    // navigation. Old --no-sandbox engines lack the required security contract.
+    const readiness = await engineRequest("/readiness");
+    try {
+      assertBrowserEngineReady(readiness);
+    } catch {
+      throw new UpstreamError("secure browser engine not ready");
+    }
+
+    const { status, payload } = await engineRequest("/sessions", { method: "POST", body: engineBody });
     if (status === 503) throw new UpstreamError("engine is at maximum concurrent sessions");
     if (status >= 400) throw new UpstreamError(`engine session create failed with ${status}`);
 
@@ -155,12 +178,37 @@ router.post("/", async (req, res, next) => {
 
     res.status(201).json({
       ...toApiSession(
-        { sessionId, status: payload.status, url: body.url ?? null, createdAt: payload.createdAt },
+        { sessionId, status: payload.status, url: targetUrl ?? null, createdAt: payload.createdAt },
         req.auth.tenantId,
       ),
       from_pool: Boolean(payload.fromPool),
       expires_at: payload.expiresAt ?? null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /v1/sessions/:id/execute — tenant-checked subset of browser commands.
+// Never expose generic evaluate, arbitrary page code, filesystem/proxy, or
+// unbounded crawler actions through the public API.
+router.post("/:id/execute", async (req, res, next) => {
+  try {
+    requireScopes(req.auth, ["sessions:write"]);
+    await assertOwned(req.auth.tenantId, req.params.id);
+    let payloadToEngine;
+    try {
+      payloadToEngine = buildSafeBrowserAction(req.body);
+    } catch (error) {
+      throw new ValidationError(error.message);
+    }
+    const { status, payload } = await engineRequest(
+      `/sessions/${encodeURIComponent(req.params.id)}/execute`,
+      { method: "POST", body: payloadToEngine },
+    );
+    if (status === 404) throw new NotFoundError("Session not found");
+    if (status >= 400) throw new UpstreamError(`Engine command rejected with ${status}`);
+    res.json(payload);
   } catch (err) {
     next(err);
   }

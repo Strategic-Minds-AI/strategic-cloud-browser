@@ -86,7 +86,9 @@ jobs:
       # dependency install — verified locally at 16 passing.
       - name: Run browser engine contract tests
         working-directory: browser-engine
-        run: npm test
+        run: |
+          npm test
+          node --test tests/sandbox-isolation.test.mjs
 
   security-audit:
     name: Security Audit
@@ -115,10 +117,18 @@ jobs:
           fi
           echo "PASS: No hardcoded API keys in source"
 
-      - name: Check SSRF guards
+      - name: Verify SSRF policy and denial regressions
         run: |
-          grep -q "isBlockedHost" browser-engine/server.js || { echo "FAIL: SSRF guard not found in engine"; exit 1; }
-          echo "PASS: SSRF guards present"
+          set -euo pipefail
+          test -f browser-engine/network-policy.js
+          grep -q "installOutboundGuard" browser-engine/server.js
+          node --check browser-engine/network-policy.js
+          node --test browser-engine/tests/network-policy.test.js
+          if grep -q 'solveGoogleSorryCaptcha' browser-engine/server.js; then
+            echo "FAIL: retired challenge solver referenced in runtime"
+            exit 1
+          fi
+          echo "PASS: executable URL/DNS guard regressions and no retired solver"
 
       - name: Check RLS enabled on all entities
         run: |
@@ -136,9 +146,175 @@ jobs:
           if [ "$MISSING" -eq 1 ]; then exit 1; fi
           echo "PASS: RLS enabled on all entity schemas"
 
+  portable-containers:
+    name: Portable Container Build and Import Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image from repo root and import shared modules
+        run: |
+          set -euo pipefail
+          docker build -f api/Dockerfile -t cloudbrowser-api:smoke .
+          docker run --rm cloudbrowser-api:smoke node --input-type=module -e 'const m=await import("./api/server.js");if(typeof m.createApp!=="function")process.exit(1)'
+
+      - name: Build worker image from repo root and import shared modules
+        run: |
+          set -euo pipefail
+          docker build -f worker/Dockerfile -t cloudbrowser-worker:smoke .
+          docker run --rm cloudbrowser-worker:smoke node --input-type=module -e 'await import("./shared/db.js");await import("./worker/lib/queue-logic.js")'
+
+      - name: Build Playwright browser engine image
+        run: |
+          set -euo pipefail
+          docker build -f browser-engine/Dockerfile -t cloudbrowser-engine:smoke .
+          docker run --rm cloudbrowser-engine:smoke sh -c 'test "$(id -u)" -ne 0 && echo "PASS: engine runtime is non-root"'
+          # The disposable GitHub runner explicitly supplies the sandbox-compatible
+          # host seccomp profile. Passing here does NOT prove Railway supports it.
+          docker run --rm --security-opt seccomp=browser-engine/seccomp_profile.json \
+            cloudbrowser-engine:smoke node runtime-sandbox-probe.mjs
+
+      - name: Prove engine fails closed without API key
+        run: |
+          set -euo pipefail
+          set +e
+          OUTPUT=$(docker run --rm cloudbrowser-engine:smoke 2>&1)
+          EXIT=$?
+          set -e
+          test "$EXIT" -ne 0
+          printf '%s\n' "$OUTPUT" | grep -q 'ENGINE_API_KEY must be set'
+
+      - name: Disposable container API and browser session E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create cloudbrowser-ci-net
+          trap 'docker rm -f cb-ci-api cb-ci-engine cb-ci-db >/dev/null 2>&1 || true; docker network rm cloudbrowser-ci-net >/dev/null 2>&1 || true' EXIT
+          docker run -d --name cb-ci-db --network cloudbrowser-ci-net \
+            -e POSTGRES_PASSWORD=ci-disposable-password \
+            -e POSTGRES_DB=cloudbrowser_qa postgres:17-alpine
+          for attempt in $(seq 1 30); do
+            if docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -Atqc "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec -i cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 < db/migrations/001_portable_core.sql
+          docker exec -i cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 < db/migrations/002_secure_api_auth.sql
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE cloudbrowser_api_login LOGIN PASSWORD 'ci-only-role-password'; GRANT cloudbrowser_api TO cloudbrowser_api_login;"
+          export CB_SECRET_A='abcdefghijklmnopqrstuvwx01234567'
+          export CB_SECRET_B='zyxwvutsrqponmlkjihgfedcba765432'
+          export CB_PEPPER='ci-only-HMAC-pepper'
+          HASH_A=$(node --input-type=module -e 'import {hashApiKey} from "./api/lib/http.js"; console.log(hashApiKey(process.env.CB_SECRET_A,process.env.CB_PEPPER))')
+          HASH_B=$(node --input-type=module -e 'import {hashApiKey} from "./api/lib/http.js"; console.log(hashApiKey(process.env.CB_SECRET_B,process.env.CB_PEPPER))')
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO tenants (id,slug,display_name) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','CI Tenant A'),('00000000-0000-4000-8000-0000000000b2','ci-b','CI Tenant B');"
+          docker exec cb-ci-db psql -U postgres -d cloudbrowser_qa -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO api_keys(tenant_id,label,environment,prefix,key_hash,scopes) VALUES ('00000000-0000-4000-8000-0000000000a1','ci-a','cb_test','qaabcdef','$HASH_A',ARRAY['sessions:read','sessions:write','jobs:read','jobs:write']),('00000000-0000-4000-8000-0000000000b2','ci-b','cb_test','qaabcde1','$HASH_B',ARRAY['sessions:read','sessions:write','jobs:read','jobs:write']);"
+          docker run -d --name cb-ci-engine --network cloudbrowser-ci-net \
+            --security-opt seccomp=browser-engine/seccomp_profile.json \
+            -e ENGINE_API_KEY=ci-only-engine-key-0123456789abcdef \
+            -e POOL_SIZE=0 -e MAX_SESSIONS=2 -e ENFORCE_HTTPS=true \
+            cloudbrowser-engine:smoke
+          docker run -d --name cb-ci-api --network cloudbrowser-ci-net \
+            -p 127.0.0.1:41000:4000 \
+            -e PORT=4000 -e API_PORT=4001 \
+            -e DATABASE_URL=postgresql://cloudbrowser_api_login:ci-only-role-password@cb-ci-db:5432/cloudbrowser_qa \
+            -e API_KEY_PEPPER="$CB_PEPPER" \
+            -e ENGINE_URL=http://cb-ci-engine:8080 \
+            -e ENGINE_API_KEY=ci-only-engine-key-0123456789abcdef \
+            cloudbrowser-api:smoke
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:41000/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          export CB_E2E_BASE_URL=http://127.0.0.1:41000
+          export CB_E2E_API_KEY_A="cb_test_qaabcdef_${CB_SECRET_A}"
+          export CB_E2E_API_KEY_B="cb_test_qaabcde1_${CB_SECRET_B}"
+          node scripts/portable-e2e.mjs
+
+  database-image:
+    name: Isolated PostgreSQL Bootstrap and Restricted Login
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build isolated staging PG17 image and test real restricted login
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f db/Dockerfile -t cloudbrowser-postgres:smoke .
+          # Passwords below are disposable CI fixtures only; never provider credentials.
+          export CI_PG_OWNER='ci-owner-only-synthetic-pass-0123456789abcdef'
+          export CI_PG_API='ci-app-only-synthetic-pass-abcdef0123456789'
+          docker run -d --name cloudbrowser-pg-image-ci \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=cloudbrowser_ci \
+            -e POSTGRES_PASSWORD="$CI_PG_OWNER" \
+            -e CLOUDBROWSER_API_DB_PASSWORD="$CI_PG_API" \
+            cloudbrowser-postgres:smoke
+          trap 'docker rm -f cloudbrowser-pg-image-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 45); do
+            if docker exec cloudbrowser-pg-image-ci psql -U postgres -d cloudbrowser_ci -Atqc "SELECT 1" >/dev/null 2>&1; then break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' cloudbrowser-pg-image-ci)" != true ]; then
+              docker logs cloudbrowser-pg-image-ci 2>&1 | tail -35
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec cloudbrowser-pg-image-ci psql -U postgres -d cloudbrowser_ci -Atqc \
+            "SELECT 1 FROM pg_roles WHERE rolname='cloudbrowser_api_login' AND NOT rolbypassrls AND NOT rolsuper" | grep -qx 1
+          ROLE_PROOF=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT current_user||':'||rolbypassrls FROM pg_roles WHERE rolname=current_user")
+          test "$ROLE_PROOF" = 'cloudbrowser_api_login:false' || test "$ROLE_PROOF" = 'cloudbrowser_api_login:f'
+          ROWS=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc "SELECT COUNT(*) FROM public.jobs")
+          test "$ROWS" = 0
+          DIRECT_READ=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT has_table_privilege(current_user,'public.api_keys','SELECT')")
+          test "$DIRECT_READ" = f
+          LOOKUP=$(docker exec -e PGPASSWORD="$CI_PG_API" cloudbrowser-pg-image-ci \
+            psql -h 127.0.0.1 -U cloudbrowser_api_login -d cloudbrowser_ci -Atqc \
+            "SELECT COUNT(*) FROM cloudbrowser_private.lookup_api_key('absent','cb_test')")
+          test "$LOOKUP" = 0
+          echo "PASS: staged DB image initializes schema and restricted, RLS-only API role"
+
+  db-isolation:
+    name: PostgreSQL 17 RLS Negative Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize disposable PostgreSQL and verify tenant isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name cloudbrowser-rls-ci \
+            -e POSTGRES_PASSWORD=ci-disposable-local-only \
+            -e POSTGRES_DB=cloudbrowser_qa \
+            postgres:17-alpine
+          trap 'docker rm -f cloudbrowser-rls-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if docker exec cloudbrowser-rls-ci psql -U postgres -d cloudbrowser_qa -Atqc "SELECT 1" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec -i cloudbrowser-rls-ci psql -U postgres -d cloudbrowser_qa \
+            -v ON_ERROR_STOP=1 < db/migrations/001_portable_core.sql
+          docker exec -i cloudbrowser-rls-ci psql -U postgres -d cloudbrowser_qa \
+            -v ON_ERROR_STOP=1 < db/migrations/002_secure_api_auth.sql
+          docker exec -i cloudbrowser-rls-ci psql -U postgres -d cloudbrowser_qa \
+            -v ON_ERROR_STOP=1 < db/tests/rls_negative.sql
+          echo "PASS: transaction-scoped, isolated PostgreSQL RLS negatives"
+
   release-status:
     name: Release Gate Status
     runs-on: ubuntu-latest
-    needs: [code-quality, engine-syntax, security-audit]
+    needs: [code-quality, engine-syntax, security-audit, portable-containers, db-isolation, database-image]
     steps:
       - run: echo "All required gates passed - release candidate verified"
