@@ -35,4 +35,4 @@ USER node
 EXPOSE 8080
 # Refuse to accept sessions on a host that cannot launch sandboxed Chromium.
 # This proof runs as non-root before the engine opens its HTTP listener.
-CMD ["sh", "-c", "node runtime-sandbox-probe.mjs && exec node server.js"]
+CMD ["sh", "-c", "if [ -z \"$ENGINE_API_KEY\" ]; then echo \"ENGINE_API_KEY must be set\" >&2; exit 1; fi; node runtime-sandbox-probe.mjs && exec node server.js"]
