@@ -1,6 +1,7 @@
 import express from "express";
 import { requireScopes } from "../lib/auth.js";
 import { withTenant } from "../../shared/db.js";
+import { assertBrowserEngineReady } from "../lib/engine-attestation.js";
 import {
   ValidationError,
   NotFoundError,
@@ -155,6 +156,15 @@ router.post("/", async (req, res, next) => {
     const engineBody = { ...body };
     delete engineBody.url;
     if (targetUrl !== undefined) engineBody.target_url = targetUrl;
+
+    // Check actual sandbox-enabled browser launch before any client-controlled
+    // navigation. Old --no-sandbox engines lack the required security contract.
+    const readiness = await engineRequest("/readiness");
+    try {
+      assertBrowserEngineReady(readiness);
+    } catch {
+      throw new UpstreamError("secure browser engine not ready");
+    }
 
     const { status, payload } = await engineRequest("/sessions", { method: "POST", body: engineBody });
     if (status === 503) throw new UpstreamError("engine is at maximum concurrent sessions");
