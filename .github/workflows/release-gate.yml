@@ -170,6 +170,10 @@ jobs:
           set -euo pipefail
           docker build -f browser-engine/Dockerfile -t cloudbrowser-engine:smoke .
           docker run --rm cloudbrowser-engine:smoke sh -c 'test "$(id -u)" -ne 0 && echo "PASS: engine runtime is non-root"'
+          # The disposable GitHub runner explicitly supplies the sandbox-compatible
+          # host seccomp profile. Passing here does NOT prove Railway supports it.
+          docker run --rm --security-opt seccomp=browser-engine/seccomp_profile.json \
+            cloudbrowser-engine:smoke node runtime-sandbox-probe.mjs
 
       - name: Prove engine fails closed without API key
         run: |
