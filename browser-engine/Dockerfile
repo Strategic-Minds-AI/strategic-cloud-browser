@@ -33,4 +33,6 @@ RUN chown -R node:node /app /ms-playwright /tmp/videos
 USER node
 
 EXPOSE 8080
-CMD ["node", "server.js"]
+# Refuse to accept sessions on a host that cannot launch sandboxed Chromium.
+# This proof runs as non-root before the engine opens its HTTP listener.
+CMD ["sh", "-c", "node runtime-sandbox-probe.mjs && exec node server.js"]
