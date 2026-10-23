@@ -10,6 +10,7 @@ test("safe X1 browser actions include parity-critical interactions", () => {
   assert.equal(buildSafeBrowserAction({ action_type: "extract_text" }).action_type, "extract_text");
   assert.equal(buildSafeBrowserAction({ action_type: "screenshot", options: { fullPage: false } }).action_type, "screenshot");
   assert.equal(buildSafeBrowserAction({ action_type: "scroll", value: 500 }).value, "500");
+  assert.equal(buildSafeBrowserAction({ action_type: "fill", selector: "input", value: "" }).value, "");
 });
 
 test("public API never accepts dangerous internal engine actions", () => {
