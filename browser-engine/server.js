@@ -397,12 +397,37 @@ api.get("/health", (req, res) => {
 api.get("/liveness", (req, res) => res.json({ ok: true, worker_id: WORKER_ID }));
 
 api.get("/readiness", async (req, res) => {
+  // Prove this exact runtime can launch Chromium with its sandbox enabled.
+  // The separate container/VM isolation and egress gates remain mandatory.
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (!Number.isInteger(uid) || uid === 0) {
+    return res.status(503).json({ ok: false, code: "NON_ROOT_REQUIRED" });
+  }
+  let browser;
   try {
-    const browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: ["--disable-dev-shm-usage"] });
-    await browser.close();
-    res.json({ ok: true, browser_launch: "verified", worker_id: WORKER_ID });
-  } catch (e) {
-    res.status(503).json({ ok: false, error: e.message, worker_id: WORKER_ID });
+    browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      args: ["--disable-dev-shm-usage"],
+      timeout: 20000,
+    });
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const page = await context.newPage();
+    await page.goto("about:blank", { timeout: 5000 });
+    const verified = await page.evaluate(() => location.href === "about:blank");
+    await context.close();
+    if (!verified) throw new Error("SANDBOX_CANARY_FAILED");
+    res.json({
+      ok: true,
+      browser_launch: "verified",
+      security: { sandbox: "required", non_root: true, uid },
+      worker_id: WORKER_ID,
+    });
+  } catch (error) {
+    // Never return a false-positive readiness attestation or raw host details.
+    res.status(503).json({ ok: false, code: "SANDBOX_CANARY_FAILED" });
+  } finally {
+    if (browser) await browser.close().catch(() => {});
   }
 });
 
