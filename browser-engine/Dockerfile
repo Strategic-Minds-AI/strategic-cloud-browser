@@ -16,6 +16,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install chromium
 
 COPY browser-engine/server.js ./
+COPY browser-engine/runtime-sandbox-probe.mjs ./
 COPY browser-engine/network-policy.js ./
 COPY browser-engine/extract-content.js ./
 COPY browser-engine/session-manager.js ./
