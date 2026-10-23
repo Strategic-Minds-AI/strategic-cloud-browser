@@ -25,10 +25,18 @@ try {
 } catch {
   evidence.proc_diagnostics = "UNAVAILABLE";
 }
+// Log only booleans / process identity for a hosted start diagnostic.
+console.log(JSON.stringify({
+  event: "x1_preflight_entered",
+  uid: evidence.uid,
+  has_engine_api_key: Boolean(process.env.ENGINE_API_KEY),
+  has_port: Boolean(process.env.PORT),
+}));
 let browser;
 try {
   if (evidence.platform !== "linux") throw new Error("LINUX_REQUIRED");
   if (evidence.uid === null || evidence.uid === 0) throw new Error("NON_ROOT_REQUIRED");
+  console.log(JSON.stringify({ event: "x1_sandbox_launch_requested" }));
   browser = await chromium.launch({
     headless: true,
     chromiumSandbox: true,
