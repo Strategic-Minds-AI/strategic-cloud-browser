@@ -60,8 +60,11 @@ export function buildSafeBrowserAction(input) {
   } else if (value !== undefined && (typeof value !== "string" || value.length > 25000)) {
     fail("Invalid action value");
   }
-  if (["type", "fill", "press"].includes(actionType) && !stringWithin(value, 25000))
+  if (["type", "press"].includes(actionType) && !stringWithin(value, 25000))
     fail("Value required for action");
+  // An empty fill is a legitimate "clear input" interaction.
+  if (actionType === "fill" && (typeof value !== "string" || value.length > 25000))
+    fail("Invalid fill value");
 
   const inputOptions = input.options ?? {};
   if (!inputOptions || typeof inputOptions !== "object" || Array.isArray(inputOptions))
