@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { ALLOWED_SESSION_ACTIONS, buildSafeBrowserAction } from "../api/lib/browser-action-policy.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routes = readFileSync(path.join(root, "api/routes/sessions.js"), "utf8");
@@ -22,15 +23,16 @@ test("session execute endpoint proves ownership and action scope before engine i
   const handler = routes.slice(start, end);
   assert.match(handler, /requireScopes\(req\.auth, \["sessions:write"\]\)/);
   assert.match(handler, /await assertOwned\(req\.auth\.tenantId, req\.params\.id\)/);
-  assert.match(handler, /ALLOWED_SESSION_ACTIONS\.has\(action\.action_type\)/);
+  assert.match(handler, /payloadToEngine = buildSafeBrowserAction\(req\.body\)/);
   assert.match(handler, /encodeURIComponent\(req\.params\.id\)\}\/execute/);
   assert.match(handler, /res\.json\(payload\)/);
 });
 
 test("public browser commands cannot execute arbitrary scripts or read cookies", () => {
-  const actionList = routes.match(/const ALLOWED_SESSION_ACTIONS = new Set\(\[([\s\S]*?)\]\)/)?.[1] || "";
-  for (const disabled of ['"evaluate"', '"extract_json"', '"export_cookies"', '"set_headers"', '"upload_file"', '"download"', '"mock_response"', '"crawl"']) {
-    assert.equal(actionList.includes(disabled), false, disabled);
+  for (const disabled of ["evaluate", "extract_json", "export_cookies", "set_headers", "upload_file", "download", "mock_response", "crawl"]) {
+    assert.equal(ALLOWED_SESSION_ACTIONS.includes(disabled), false, disabled);
+    assert.throws(() => buildSafeBrowserAction({ action_type: disabled }), /Unsupported session action/);
   }
-  assert.ok(actionList.includes('"screenshot"'));
+  assert.ok(ALLOWED_SESSION_ACTIONS.includes("screenshot"));
+  assert.equal(buildSafeBrowserAction({ action_type: "screenshot" }).action_type, "screenshot");
 });
